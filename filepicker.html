@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>附加文件 - 发送到 ntfy</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Filepicker layout overrides */
+        html,
+        body {
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            min-height: 56px;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px 8px 20px;
+            text-align: center;
+        }
+
+        .status {
+            margin-top: 8px;
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-title">
+            <img src="icons/icon48.png" alt="ntfy">
+            <span>附加文件</span>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <p class="subtitle">选择或拖放文件，作为通知的附件</p>
+
+        <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-icon">📎</div>
+            <div class="drop-zone-text">将文件拖放到此处</div>
+            <div class="drop-zone-hint">或点击浏览</div>
+        </div>
+
+        <input type="file" id="file-input" class="file-input" multiple>
+
+        <div class="status" id="status"></div>
+    </div>
+
+    <script src="filepicker.js"></script>
+</body>
+
+</html>

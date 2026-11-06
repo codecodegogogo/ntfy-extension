@@ -1,0 +1,2095 @@
+/* Ntfy for chrome - Styles */
+
+/* ========================================
+   Local Font Definitions
+   ======================================== */
+
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('fonts/roboto-400.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('fonts/roboto-500.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('fonts/roboto-600.woff2') format('woff2');
+}
+
+/* ========================================
+   CSS Variables & Theming
+   ======================================== */
+
+:root {
+    /* NTFY.sh inspired color palette */
+    --primary: #338574;
+    --primary-dark: #2a6e60;
+    --primary-light: #2a7566; /* text accent: 5.5:1 on white */
+
+    /* Light theme */
+    --bg-main: #f3f5f4;
+    --bg-card: #ffffff;
+    --bg-input: #ffffff;
+    --text-primary: #111111;
+    --text-secondary: #4a4a4a;
+    --text-placeholder: #8f8f8f; /* Hint text in empty fields, like ntfy's (42 % of the text color) */
+    --border-color: #cdd5d2;
+    --border-focus: #338574;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+    /* Popup size (Medium), set in the settings: the popup's outer size, and the scale of its
+       text and spacing. popup.html zooms the page by the scale. */
+    --popup-width: 600px;
+    --popup-height: 596px;
+    --ui-scale: 0.9;
+    --header-height: 40px;
+
+    /* Input fields: a light tint over the card or page behind them */
+    --field-bg: rgba(17, 17, 17, 0.03);
+    --field-bg-hover: rgba(17, 17, 17, 0.05);
+
+    /* Amber notice */
+    --notice-bg: #fff3d6;
+    --notice-border: #f0b429;
+    --notice-text: #5c3d00;
+    --notice-link: #8a5a00;
+}
+
+/* The views below the header, in the zoomed page's pixels. Set on body, where the size's values are. */
+body {
+    --main-height: calc(var(--popup-height) / var(--ui-scale) - var(--header-height));
+}
+
+/* Popup sizes; Medium and Large use the browsers' full popup height (600 px), Large also the
+   full width (800 px). Small and Medium scale the text down. */
+body[data-size="small"] {
+    --popup-width: 480px;
+    --popup-height: 520px;
+    --ui-scale: 0.8;
+}
+
+body[data-size="large"] {
+    --popup-width: 800px;
+    --popup-height: 596px;
+    --ui-scale: 1;
+}
+
+/* Dark theme - matching NTFY.sh web UI */
+body[data-theme="dark"] {
+    --bg-main: #1B2124;
+    --bg-card: #252e32;
+    --bg-input: #252b2a;
+    --text-primary: #f2f4f3;
+    --text-secondary: #b9c2bf;
+    --text-placeholder: #878d8b;
+    --border-color: #4b5754;
+    --border-focus: #4a9d8c;
+    --primary-light: #66c0ac; /* text accent: 6.7:1 on the dark inputs */
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --field-bg: rgba(255, 255, 255, 0.04);
+    --field-bg-hover: rgba(255, 255, 255, 0.06);
+    --notice-bg: #3a3020;
+    --notice-border: #c8922a;
+    --notice-text: #f5e2bc;
+    --notice-link: #ffc857;
+}
+
+/* Auto theme (system preference) */
+@media (prefers-color-scheme: dark) {
+
+    body[data-theme="auto"] {
+        --bg-main: #1B2124;
+        --bg-card: #252e32;
+        --bg-input: #252b2a;
+        --text-primary: #f2f4f3;
+        --text-secondary: #b9c2bf;
+    --text-placeholder: #878d8b;
+        --border-color: #4b5754;
+        --border-focus: #4a9d8c;
+        --primary-light: #66c0ac; /* text accent: 6.7:1 on the dark inputs */
+        --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        --field-bg: rgba(255, 255, 255, 0.04);
+        --field-bg-hover: rgba(255, 255, 255, 0.06);
+        --notice-bg: #3a3020;
+        --notice-border: #c8922a;
+        --notice-text: #f5e2bc;
+        --notice-link: #ffc857;
+    }
+}
+
+/* ========================================
+   Reset & Base Styles
+   ======================================== */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+}
+
+/* Form controls don't inherit the page font by default and would use the system font */
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+}
+
+/* Bold is the bundled 600 weight; there's no 700 face, so the browser would fake one */
+b,
+strong {
+    font-weight: 600;
+}
+
+/* ========================================
+   Header Component
+   ======================================== */
+
+.header {
+    background: linear-gradient(to right, #317f6e 0, #57a49a 600px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    padding: 4px 16px; /* 40 px with the 32 px buttons, like the Send/Receive row */
+    display: flex;
+    align-items: center;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-title {
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-title img {
+    width: 20px;
+    height: 20px;
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.back-btn,
+.icon-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    color: rgba(255, 255, 255, 0.9);
+    box-shadow: none;
+}
+
+.back-btn svg,
+.icon-btn svg {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
+}
+
+.back-btn:hover,
+.icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.15);
+    transform: none;
+    box-shadow: none;
+    color: white;
+}
+
+.back-btn:active,
+.icon-btn:active:not(:disabled) {
+    background: rgba(255, 255, 255, 0.25);
+    transform: none;
+}
+
+.icon-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: transparent;
+    color: white;
+    box-shadow: none;
+}
+
+/* Highlighted settings button while a setting is missing: an amber border and background, as on
+   the Required settings, fade in and out; the icon keeps its color */
+.icon-btn.highlight {
+    border-color: var(--notice-border);
+    box-shadow: inset 0 0 0 1px var(--notice-border); /* 2px with the border */
+    background: var(--notice-border);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Back button visibility */
+.back-btn {
+    display: none;
+}
+
+.back-btn.visible {
+    display: flex;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        border-color: var(--notice-border);
+        box-shadow: inset 0 0 0 1px var(--notice-border);
+        background: var(--notice-border);
+    }
+
+    50% {
+        border-color: transparent;
+        box-shadow: inset 0 0 0 1px transparent;
+        background: transparent;
+    }
+}
+
+/* ========================================
+   View Containers
+   ======================================== */
+
+.view {
+    display: none;
+}
+
+.view.active {
+    display: block;
+}
+
+/* ========================================
+   Main Content
+   ======================================== */
+
+.main-content {
+    padding: 12px 16px;
+    padding-bottom: 12px;
+    min-height: auto;
+}
+
+/* ========================================
+   Form Elements
+   ======================================== */
+
+.form-group {
+    margin-bottom: 8px;
+}
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+    transition: color 0.2s;
+}
+
+.form-group:focus-within .form-label {
+    color: var(--primary);
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    width: 100%;
+    padding: 6px 8px 8px;
+    font: inherit; /* Form controls don't inherit the page font by default */
+    font-size: 15px;
+    background-color: var(--field-bg);
+    color: var(--text-primary);
+    border: none;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: -1px;
+    border-radius: 6px 6px 0 0;
+    transition: border-color 0.2s, background-color 0.2s;
+    outline: none;
+}
+
+.form-input:hover,
+.form-select:hover,
+.form-textarea:hover {
+    border-bottom-color: var(--border-focus);
+    background-color: var(--field-bg-hover);
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    border-bottom-color: var(--border-focus);
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder,
+.topic-input-field::placeholder,
+.tag-input-field::placeholder {
+    color: var(--text-placeholder);
+}
+
+/* Tag/Topic input hint: hidden by default, shown when user has input */
+.tag-input-hint,
+.topic-input-hint {
+    display: none;
+    font-size: 11px;
+    font-style: italic;
+    color: var(--text-secondary);
+    pointer-events: none;
+    white-space: nowrap;
+    flex-basis: 100%;
+    text-align: right;
+}
+
+.tag-input-hint.visible,
+.topic-input-hint.visible {
+    display: block;
+}
+
+.form-textarea {
+    resize: vertical;
+    min-height: 60px;
+    font-family: inherit;
+}
+
+.form-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    padding-bottom: 6px;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+/* ========================================
+   Badges (Topics & Tags)
+   ======================================== */
+
+.topics-container,
+.tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 6px;
+    background-color: var(--field-bg);
+    border: none;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: -1px;
+    border-radius: 6px 6px 0 0;
+    min-height: 38px;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.topics-container:hover,
+.tags-container:hover {
+    border-bottom-color: var(--border-focus);
+    background-color: var(--field-bg-hover);
+}
+
+/* Room for the emoji button in its corner */
+.tags-container {
+    position: relative;
+    padding-right: 36px;
+}
+
+.topics-container:focus-within,
+.tags-container:focus-within {
+    border-bottom-color: var(--border-focus);
+}
+
+.topic-badge,
+.tag-badge {
+    display: flex;
+    align-items: center;
+    background: linear-gradient(to right, #317f6e 0%, #57a49a 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 13px;
+    cursor: move;
+    user-select: none;
+}
+
+.topic-badge.dragging,
+.tag-badge.dragging {
+    opacity: 0.5;
+}
+
+.topic-badge.drag-over,
+.tag-badge.drag-over {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 2px var(--primary);
+}
+
+.topic-remove,
+.tag-remove {
+    margin-left: 6px;
+    cursor: pointer;
+    opacity: 0.8;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.topic-remove:hover,
+.tag-remove:hover {
+    opacity: 1;
+}
+
+.topic-input-field,
+.tag-input-field {
+    border: none;
+    outline: none;
+    background: transparent;
+    padding: 4px 0;
+    flex: 1;
+    min-width: 20px;
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.topic-input-field:focus,
+.tag-input-field:focus {
+    min-width: 80px;
+}
+
+/* ========================================
+   File Attachment
+   ======================================== */
+
+.file-section {
+    margin-bottom: 8px;
+    margin-top: 10px;
+}
+
+.file-input {
+    display: none;
+}
+
+.file-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--primary);
+    background-color: transparent;
+    border: 1px dashed var(--primary);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.file-btn:hover {
+    background-color: rgba(51, 133, 116, 0.1);
+}
+
+.file-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.file-preview {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    /* No scrolling of its own: the send options around it scroll */
+}
+
+.file-preview.visible {
+    display: flex;
+}
+
+.file-preview-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+/* On/off row: title and explanation, with a switch on the right (settings, Send files as one ZIP) */
+.switch-row {
+    display: flex;
+    position: relative;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.switch-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.switch-title,
+.switch-hint {
+    display: block;
+}
+
+.switch-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.switch-hint {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.switch-row input[type="checkbox"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.switch {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 20px;
+    padding: 2px;
+    background-color: var(--border-color);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.switch span {
+    display: block;
+    width: 14px;
+    height: 14px;
+    background-color: var(--bg-card);
+    border-radius: 50%;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s;
+}
+
+.switch-row input[type="checkbox"]:checked + .switch {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.switch-row input[type="checkbox"]:checked + .switch span {
+    transform: translateX(14px);
+}
+
+.switch-row input[type="checkbox"]:focus-visible + .switch {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+/* Send files as one ZIP: a framed row, shown with more than one attachment */
+.zip-toggle {
+    display: none;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 9px 10px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    transition: border-color 0.2s, background-color 0.2s, opacity 0.2s;
+}
+
+.zip-toggle.visible {
+    display: flex;
+}
+
+.zip-toggle:hover:not(.disabled) {
+    border-color: var(--primary);
+}
+
+.zip-toggle.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.file-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.file-info {
+    flex: 1;
+    overflow: hidden;
+}
+
+.file-name {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-size {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.file-remove {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.file-remove:hover {
+    color: #e53935;
+}
+
+.file-remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+
+
+/* ========================================
+   Chips (Priority & Theme)
+   ======================================== */
+
+.chips {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.chip {
+    padding: 6px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    background-color: var(--bg-input);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.chip:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.chip.active {
+    background: linear-gradient(to right, #317f6e 0%, #57a49a 100%);
+    border-color: #317f6e;
+    color: white;
+}
+
+/* Priority Icons */
+.p-icon {
+    margin-right: 4px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.chip.active .p-icon {
+    color: inherit;
+}
+
+/* ========================================
+   Send Footer & Buttons
+   ======================================== */
+
+.composer-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.composer-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.composer-checkbox label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+/* ========================================
+   Status Message
+   ======================================== */
+
+.status {
+    text-align: center;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    display: none;
+}
+
+.status.visible {
+    display: block;
+}
+
+.status.success {
+    background-color: rgba(51, 133, 116, 0.15);
+    color: var(--primary);
+}
+
+.status.error {
+    background-color: rgba(229, 57, 53, 0.15);
+    color: #e53935;
+}
+
+.status.warning {
+    background-color: rgba(255, 152, 0, 0.15);
+    color: #f57c00;
+}
+
+/* ========================================
+   Settings View
+   ======================================== */
+
+.section-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin: 12px 0 8px 0;
+    color: var(--text-secondary);
+}
+
+.section-title:first-of-type {
+    margin-top: 0;
+}
+
+/* ========================================
+   Tooltip
+   ======================================== */
+
+.tooltip {
+    position: fixed;
+    /* Placed when shown; until then out of the way, so it doesn't add to the popup's height */
+    top: 0;
+    left: 0;
+    padding: 6px 10px;
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    box-shadow: var(--shadow);
+    z-index: 1000;
+    white-space: nowrap;
+}
+
+.tooltip.visible {
+    opacity: 1;
+}
+
+
+
+/* ========================================
+   Filepicker-specific Styles
+   ======================================== */
+
+.filepicker-page html,
+.filepicker-page body,
+body.filepicker-page {
+    height: 100%;
+    overflow: hidden;
+}
+
+.filepicker-page .main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    text-align: center;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+/* Drop zone */
+.drop-zone {
+    border: 2px dashed var(--border-color);
+    border-radius: 12px;
+    padding: 28px 24px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+    cursor: pointer;
+    width: 100%;
+    max-width: 320px;
+}
+
+.drop-zone:hover {
+    border-color: var(--primary);
+    background-color: rgba(51, 133, 116, 0.05);
+}
+
+.drop-zone.drag-over {
+    border-color: var(--primary);
+    background-color: rgba(51, 133, 116, 0.1);
+    transform: scale(1.02);
+}
+
+.drop-zone-icon {
+    font-size: 36px;
+    margin-bottom: 8px;
+}
+
+.drop-zone-text {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.drop-zone-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+/* ========================================
+   Recent Notifications Section
+   ======================================== */
+
+.notifications-section {
+    margin-top: 0;
+    border-top: none;
+    padding-top: 0;
+}
+
+.notifications-section .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.notifications-section .section-title {
+    margin: 0;
+    line-height: 1.3;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Topic name with the switch for its notifications */
+.section-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.notifications-section .section-heading .section-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notify-toggle {
+    flex: none;
+    gap: 4px;
+    color: var(--text-secondary);
+}
+
+.notify-toggle[hidden],
+.notify-toggle:has(input:checked) .notify-icon-off,
+.notify-toggle:has(input:not(:checked)) .notify-icon-on {
+    display: none;
+}
+
+.notify-icon {
+    fill: currentColor;
+}
+
+/* Off for all topics: a topic's switch can't turn them on */
+.notify-toggle:has(input:disabled) {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.notifications-list {
+    max-height: 250px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 4px; /* space for scrollbar */
+}
+
+.notification-item {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 10px 10px 14px; /* Left padding increased for priority indicator */
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+    transition: border-color 0.2s;
+}
+
+.notification-item:hover {
+    border-color: var(--primary-light);
+}
+
+/* Priority indicator left border */
+.notification-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+    background-color: transparent;
+}
+
+.notification-item[data-priority="1"]::before { background-color: #9e9e9e; } /* Min - Gray */
+.notification-item[data-priority="2"]::before { background-color: #2196f3; } /* Low - Blue */
+.notification-item[data-priority="3"]::before { background-color: transparent; } /* Default - None */
+.notification-item[data-priority="4"]::before { background-color: #ff9800; } /* High - Orange */
+.notification-item[data-priority="5"]::before { background-color: #f44336; } /* Urgent - Red */
+
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.notification-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.notification-time {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.notification-message {
+    font-size: 14px;
+    color: var(--text-primary);
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+/* Markdown messages: compact, so they fit the list like plain ones */
+.notification-message.markdown {
+    white-space: normal;
+}
+
+.notification-message.markdown > :first-child,
+.notification-message.markdown li > :first-child,
+.notification-message.markdown blockquote > :first-child {
+    margin-top: 0;
+}
+
+.notification-message.markdown > :last-child,
+.notification-message.markdown li > :last-child,
+.notification-message.markdown blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+.notification-message.markdown p,
+.notification-message.markdown ul,
+.notification-message.markdown ol,
+.notification-message.markdown pre,
+.notification-message.markdown blockquote,
+.notification-message.markdown .markdown-table {
+    margin: 6px 0;
+}
+
+.notification-message.markdown h1,
+.notification-message.markdown h2,
+.notification-message.markdown h3,
+.notification-message.markdown h4,
+.notification-message.markdown h5,
+.notification-message.markdown h6 {
+    margin: 8px 0 4px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.notification-message.markdown h1 { font-size: 17px; }
+.notification-message.markdown h2 { font-size: 16px; }
+.notification-message.markdown h3 { font-size: 15px; }
+.notification-message.markdown h4,
+.notification-message.markdown h5,
+.notification-message.markdown h6 { font-size: 14px; }
+
+.notification-message.markdown ul,
+.notification-message.markdown ol {
+    padding-left: 20px;
+}
+
+.notification-message.markdown li > p {
+    margin: 0;
+}
+
+.notification-message.markdown li.task-item {
+    list-style: none;
+}
+
+.notification-message.markdown li.task-item input {
+    margin: 0 6px 0 -18px;
+    vertical-align: middle;
+}
+
+.notification-message.markdown code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--bg-main);
+}
+
+.notification-message.markdown pre {
+    padding: 8px;
+    border-radius: 4px;
+    background: var(--bg-main);
+    overflow-x: auto;
+}
+
+.notification-message.markdown pre code {
+    padding: 0;
+    background: none;
+    white-space: pre;
+}
+
+.notification-message.markdown blockquote {
+    padding-left: 10px;
+    border-left: 3px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.notification-message.markdown hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 8px 0;
+}
+
+.notification-message.markdown .markdown-table {
+    overflow-x: auto;
+}
+
+.notification-message.markdown table {
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.notification-message.markdown th,
+.notification-message.markdown td {
+    padding: 3px 8px;
+    border: 1px solid var(--border-color);
+    text-align: left;
+}
+
+.notification-message.markdown th {
+    font-weight: 600;
+    background: var(--bg-main);
+}
+
+.notification-link {
+    color: var(--primary-light);
+    text-decoration: underline;
+}
+
+.notification-image {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 8px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    background: none;
+    cursor: pointer;
+}
+
+.notification-image img {
+    display: block;
+    max-width: 100%;
+    max-height: 160px;
+    object-fit: contain;
+}
+
+.notification-tags {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.notifications-loading,
+.notifications-empty,
+.notifications-error {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.notifications-error {
+    color: #f44336;
+}
+
+/* Nothing to head or manage before the setup is done */
+.notifications-section.setup .section-header {
+    display: none;
+}
+
+.setup-hint {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: 40px;
+}
+
+.setup-hint-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Read state */
+.notification-item.read {
+    opacity: 0.75;
+}
+
+.notification-item.read::before {
+    opacity: 0.5; /* Fade priority indicator too */
+}
+
+.unread-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background-color: var(--primary);
+    vertical-align: 1px;
+}
+
+.notification-item.read .unread-dot {
+    display: none;
+}
+
+.notification-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    gap: 8px;
+}
+
+.notification-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto; /* Push to right if no tags */
+}
+
+.notification-action-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.notification-action-btn:hover {
+    background-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.notification-action-btn.read-btn:hover {
+    color: var(--primary-light);
+    background-color: rgba(51, 133, 116, 0.1);
+}
+
+.notification-action-btn.delete-btn:hover {
+    color: #f44336;
+    background-color: rgba(244, 67, 54, 0.1);
+}
+
+.notification-action-btn.copy-btn:hover {
+    color: var(--primary-light);
+    background-color: rgba(51, 133, 116, 0.1);
+}
+
+.notification-action-btn.copy-btn.copied {
+    width: auto;
+    padding: 0 8px;
+    border-radius: 13px;
+    font-size: 12px;
+    color: #fff;
+    background-color: var(--primary);
+}
+
+.notification-action-btn.download-btn:hover {
+    color: #2196f3;
+    background-color: rgba(33, 150, 243, 0.1);
+}
+
+/* Armed delete: a second click confirms */
+.notification-action-btn.delete-btn.confirming {
+    width: auto;
+    padding: 0 8px;
+    border-radius: 13px;
+    font-size: 12px;
+    color: #fff;
+    background-color: #d32f2f;
+}
+
+.notification-action-btn.delete-btn.confirming:hover {
+    color: #fff;
+    background-color: #b71c1c;
+}
+
+/* ========================================
+   Notifications Control Bar (Bulk Actions)
+   ======================================== */
+
+.notifications-control-bar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 0 4px;
+}
+
+.control-btn {
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.control-btn:hover {
+    background-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+#mark-all-read-btn:hover {
+    color: var(--primary-light);
+    background-color: rgba(51, 133, 116, 0.1);
+}
+
+#delete-all-btn:hover {
+    color: #f44336;
+    background-color: rgba(244, 67, 54, 0.1);
+}
+
+#delete-all-btn.confirming,
+#delete-all-btn.confirming:hover {
+    color: #fff;
+    background-color: #d32f2f;
+}
+
+/* ========================================
+   Settings View: sections as cards
+   ======================================== */
+
+/* As tall as its sections, up to the main view's height; beyond that they scroll */
+#settings-view.active {
+    max-height: var(--main-height);
+    overflow-y: auto;
+}
+
+.settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+.settings-section {
+    padding: 10px 12px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.settings-section-title {
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--primary-light);
+}
+
+/* A section's title and its on/off switch, with the settings below */
+.settings-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-section-header .settings-section-title {
+    margin-bottom: 0;
+}
+
+.settings-section-body {
+    margin-top: 10px;
+}
+
+.settings-section-body[hidden] {
+    display: none;
+}
+
+.section-switch {
+    flex: 0 0 auto;
+}
+
+.receive-section-hint {
+    margin-top: 0;
+}
+
+/* One subscription: its own server and topics, added with the button below */
+.subscriptions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.subscription-card {
+    padding: 10px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.subscription-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.subscription-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.subscription-remove-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.subscription-remove-btn:hover {
+    color: #f44336;
+    border-color: #f44336;
+}
+
+.subscription-card .form-group {
+    margin-bottom: 8px;
+}
+
+.subscription-card .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.add-subscription-btn {
+    margin-bottom: 8px;
+}
+
+/* A setting needed to send and receive, still empty */
+.settings-section.missing {
+    border-color: var(--notice-border);
+    border-left-width: 4px;
+}
+
+.settings-section.missing .settings-section-title::after {
+    content: '必填';
+    margin-left: 8px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background-color: var(--notice-bg);
+    color: var(--notice-link);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* Two settings side by side (server URL and token, theme and size) */
+.settings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* Settings stacked full width (subscription server and topics) */
+.settings-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.settings-section .form-group {
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+/* Username and password below the server URL and token, lined up with them */
+.settings-row .credentials-group,
+.settings-row .insecure-hint {
+    grid-column: 1 / -1;
+}
+
+.credentials-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.settings-section .insecure-hint {
+    margin-top: -8px;
+    color: #f44336;
+    font-style: normal;
+    opacity: 1;
+}
+
+.insecure-hint[hidden] {
+    display: none;
+}
+
+.settings-section .form-input {
+    padding: 4px 8px 6px;
+}
+
+.settings-section .form-hint {
+    margin-top: 3px;
+    padding-bottom: 0;
+}
+
+.settings-section #server-access-btn,
+.settings-section .subscription-access-btn {
+    margin-top: 6px;
+}
+
+.settings-section .switch-title {
+    font-size: 14px;
+}
+
+.settings-section .switch-hint {
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+/* Stays in view while the sections scroll */
+.settings-content > .status {
+    position: sticky;
+    bottom: 0;
+    margin-top: 0;
+    box-shadow: var(--shadow);
+}
+
+/* The status tints, opaque over the scrolled sections */
+.settings-content > .status.success {
+    background-color: color-mix(in srgb, var(--primary) 15%, var(--bg-card));
+}
+
+.settings-content > .status.error {
+    background-color: color-mix(in srgb, #e53935 15%, var(--bg-card));
+}
+
+.settings-content > .status.warning {
+    background-color: color-mix(in srgb, #ff9800 15%, var(--bg-card));
+}
+
+/* ========================================
+   Main View: Topic List, Messages, Composer
+   ======================================== */
+
+/* Fixed height, so the composer stays at the bottom and the message list takes the rest.
+   The receive hint above takes its height from it, so the popup keeps its size. */
+#main-view.active {
+    display: flex;
+    flex-direction: column;
+    height: var(--main-height);
+}
+
+.receive-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 10px;
+}
+
+.receive-layout .notifications-section {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.receive-layout .notifications-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
+
+.topic-sidebar {
+    flex: 0 0 170px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 8px;
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+}
+
+.topic-filter-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.topic-filter-btn:hover {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+}
+
+.topic-filter-btn.active {
+    background-color: var(--bg-input);
+    color: var(--primary-light);
+    font-weight: 600;
+}
+
+.topic-filter-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Notifications switched off; an unread count stays on the right */
+.topic-muted-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-right: auto;
+    fill: currentColor;
+    opacity: 0.7;
+}
+
+.topic-unread-count {
+    flex: none;
+    min-width: 18px;
+    padding: 1px 5px;
+    border-radius: 9px;
+    background-color: #f44336;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Heading and bulk actions on one centred line */
+.notifications-section .control-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1.3;
+}
+
+#status {
+    margin-top: 8px;
+}
+
+/* One-time hint about the Receive messages setting, below the header */
+.receive-hint {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 16px 0;
+    padding: 8px 6px 8px 10px;
+    background-color: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    border-left-width: 4px;
+    border-radius: 8px;
+    color: var(--notice-text);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.receive-hint[hidden] {
+    display: none;
+}
+
+.receive-hint-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.receive-hint-dismiss {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--notice-text);
+    cursor: pointer;
+}
+
+.receive-hint-dismiss:hover {
+    background-color: var(--notice-border);
+}
+
+.receive-hint-dismiss svg {
+    fill: currentColor;
+}
+
+/* ========================================
+   Composer (like the ntfy web app's message bar)
+   ======================================== */
+
+.composer {
+    flex: none;
+    margin-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+.composer[hidden] {
+    display: none;
+}
+
+.composer-options {
+    display: none;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 10px 4px 4px 0;
+}
+
+.composer.options-open .composer-options {
+    display: block;
+}
+
+/* Open options take the messages' place and the full height */
+.notifications-section:has(.composer.options-open:not([hidden])) .notifications-list,
+.notifications-section:has(.composer.options-open:not([hidden])) .notifications-control-bar {
+    display: none;
+}
+
+.composer.options-open:not([hidden]) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.composer.options-open .composer-options {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
+
+.composer-options .file-section {
+    margin-top: 4px;
+}
+
+.composer-options .composer-checkbox {
+    margin-top: 6px;
+}
+
+/* Open options: the bar below them becomes their footer */
+.composer.options-open .composer-bar {
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.send-another {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.composer.options-open .send-another {
+    display: flex;
+}
+
+.send-another input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.send-label {
+    display: none;
+}
+
+.composer-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    padding-top: 8px;
+}
+
+/* The message field, with the link button inside it at the bottom right */
+.composer-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+#message-slot .composer-field {
+    width: 100%;
+}
+
+.composer-input {
+    display: block;
+    width: 100%;
+    padding: 6px 34px 6px 8px;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.4;
+    color: var(--text-primary);
+    background-color: var(--field-bg);
+    border: none;
+    border-bottom: 2px solid var(--border-color);
+    border-radius: 6px 6px 0 0;
+    outline: none;
+    resize: none;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.composer-input:hover,
+.composer-input:focus {
+    border-bottom-color: var(--border-focus);
+}
+
+.composer-input:hover {
+    background-color: var(--field-bg-hover);
+}
+
+.composer-input::placeholder {
+    color: var(--text-placeholder);
+}
+
+.composer-btn {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+/* Insert the tab's URL: inside the message field, kept in the background */
+.composer-btn.insert-url-btn {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 28px;
+    height: 28px;
+    opacity: 0.55;
+}
+
+.composer-btn.insert-url-btn:hover:not(:disabled),
+.composer-btn.insert-url-btn:focus-visible {
+    opacity: 1;
+}
+
+/* Emoji picker button: in the tags field's corner, like the URL button in the message field */
+.composer-btn.emoji-btn {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 28px;
+    height: 28px;
+    opacity: 0.55;
+}
+
+.composer-btn.emoji-btn:hover:not(:disabled),
+.composer-btn.emoji-btn:focus-visible,
+.composer-btn.emoji-btn[aria-expanded="true"] {
+    opacity: 1;
+}
+
+/* Floats above the tags field (placed by popup.js), sized like ntfy's */
+.emoji-picker {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 900; /* Below the tooltip */
+    width: 380px;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 0 4px 12px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.emoji-picker[hidden] {
+    display: none;
+}
+
+.emoji-search {
+    width: calc(100% - 12px);
+    padding: 4px 0;
+    border: none;
+    border-bottom: 2px solid var(--border-color);
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    outline: none;
+}
+
+.emoji-search:focus {
+    border-bottom-color: var(--border-focus);
+}
+
+.emoji-search::placeholder {
+    color: var(--text-placeholder);
+}
+
+.emoji-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    flex: 0 1 240px;
+    min-height: 0;
+    overflow-y: auto;
+    margin-top: 8px;
+    scrollbar-width: thin;
+}
+
+.emoji-category {
+    width: 100%;
+    margin: 6px 0 2px;
+    color: var(--text-primary);
+}
+
+.emoji-list.searching .emoji-category {
+    display: none;
+}
+
+.emoji-option {
+    width: 34px;
+    height: 34px;
+    margin: 2px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    font-size: 24px;
+    line-height: 34px;
+    cursor: pointer;
+    opacity: 0.85;
+}
+
+.emoji-option:hover,
+.emoji-option:focus-visible {
+    opacity: 1;
+    background-color: rgba(51, 133, 116, 0.1);
+}
+
+.emoji-option[hidden] {
+    display: none;
+}
+
+/* No web page address to insert: a click says why */
+.composer-btn.insert-url-btn.unavailable {
+    opacity: 0.3;
+}
+
+/* The options toggle, when not receiving */
+.composer-btn[hidden] {
+    display: none;
+}
+
+.composer-btn svg {
+    fill: currentColor;
+    transition: transform 0.2s;
+}
+
+.composer-btn:hover:not(:disabled) {
+    background-color: rgba(51, 133, 116, 0.1);
+    color: var(--text-primary);
+}
+
+.composer-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.composer-btn.send-btn {
+    margin-left: auto;
+    color: var(--primary-light);
+}
+
+.composer-btn.send-btn:hover:not(:disabled) {
+    color: var(--primary-light);
+}
+
+/* A filled, labelled Send button below the open options */
+.composer.options-open .composer-btn.send-btn {
+    width: auto;
+    height: 34px;
+    gap: 6px;
+    padding: 0 16px 0 12px;
+    border-radius: 17px;
+    background-color: var(--primary);
+    color: #ffffff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.composer.options-open .composer-btn.send-btn:hover:not(:disabled) {
+    background-color: var(--primary-dark);
+    color: #ffffff;
+}
+
+.composer.options-open .composer-btn.send-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.composer.options-open .send-label {
+    display: inline;
+}
+
+.composer.options-open #composer-toggle svg {
+    transform: rotate(180deg);
+}
+
+/* The closed options hold a title or files */
+.composer:not(.options-open) #composer-toggle.has-extras::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--primary-light);
+}

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=600">
+  <title>发送到 ntfy</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Popup-specific layout */
+    /* Wide enough for the topic list next to the messages. The popup size setting sets the width
+       and the zoom of text and spacing (styles.css); the width is in the zoomed page's pixels. */
+    body {
+      zoom: var(--ui-scale);
+      width: calc(var(--popup-width) / var(--ui-scale));
+    }
+
+    .header {
+      justify-content: space-between;
+    }
+
+    .status {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body data-theme="auto">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">
+        <img src="icons/icon48.png" alt="ntfy" style="width: 20px; height: 20px;">
+        <span id="header-text">Ntfy</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="back-btn" id="back-btn" title="返回">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+        </svg>
+      </button>
+      <button class="icon-btn" id="open-url-btn" title="在 ntfy 中打开">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+          <path
+            d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+        </svg>
+      </button>
+      <button class="icon-btn" id="settings-btn" title="设置">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+          <path
+            d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.49l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main View: topic list, the selected topic's messages, and the composer below them -->
+  <div class="view active" id="main-view">
+    <!-- Shown once, until dismissed: where receiving is switched on and off -->
+    <div class="receive-hint" id="receive-hint" hidden>
+      <span class="receive-hint-text">
+        <span id="receive-hint-message"></span>
+      </span>
+      <button class="receive-hint-dismiss" id="receive-hint-dismiss" title="关闭" aria-label="关闭">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+        </svg>
+      </button>
+    </div>
+    <div class="main-content receive-layout">
+      <!-- Topic list: All topics (when receiving), then each configured topic -->
+      <nav class="topic-sidebar" id="topic-sidebar" aria-label="主题"></nav>
+      <!-- Notifications Section -->
+      <div class="notifications-section" id="notifications-section">
+        <div class="section-header">
+          <div class="section-heading">
+            <span class="section-title" id="notifications-title">通知</span>
+            <!-- Notifications of the selected topic, or of all topics on All topics -->
+            <label class="switch-row notify-toggle" id="notify-toggle" hidden>
+              <svg class="notify-icon notify-icon-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
+                height="16" aria-hidden="true">
+                <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z" />
+              </svg>
+              <svg class="notify-icon notify-icon-off" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
+                height="16" aria-hidden="true">
+                <path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z" />
+              </svg>
+              <input type="checkbox" id="notify-checkbox" aria-label="通知">
+              <span class="switch" aria-hidden="true"><span></span></span>
+            </label>
+          </div>
+          <div class="notifications-control-bar" id="notifications-control-bar" style="visibility: hidden;">
+            <button class="control-btn" id="mark-all-read-btn" title="全部标为已读">✓ 全部标为已读</button>
+            <button class="control-btn" id="delete-all-btn" title="全部删除">🗑 全部删除</button>
+          </div>
+        </div>
+        <div class="notifications-list" id="notifications-list">
+          <div class="notifications-loading">正在加载通知…</div>
+        </div>
+
+        <!-- Status Message -->
+        <div class="status" id="status"></div>
+
+        <!-- Composer: sends to the selected topic, hidden on All topics; always open when not receiving -->
+        <div class="composer" id="composer" hidden>
+          <!-- Further send options, opened with the arrow button -->
+          <div class="composer-options" id="composer-options">
+            <!-- Title (Optional) -->
+            <div class="form-group">
+              <label class="form-label" for="title-input">标题</label>
+              <input type="text" class="form-input" id="title-input"
+                placeholder="通知标题，例如：磁盘空间告警">
+            </div>
+
+            <!-- Message: the message bar's field moves here while the options are open -->
+            <div class="form-group">
+              <label class="form-label" for="message-input">消息</label>
+              <div id="message-slot"></div>
+              <div class="composer-checkbox markdown-option">
+                <input type="checkbox" id="markdown-checkbox">
+                <label for="markdown-checkbox">以 Markdown 格式发送</label>
+              </div>
+            </div>
+
+            <!-- Priority -->
+            <div class="form-group">
+              <label class="form-label">优先级</label>
+              <div class="chips" id="priority-chips">
+                <button class="chip" data-priority="1"><span class="p-icon">⇊</span>最低</button>
+                <button class="chip" data-priority="2"><span class="p-icon">↓</span>低</button>
+                <button class="chip active" data-priority="3">默认</button>
+                <button class="chip" data-priority="4"><span class="p-icon">↑</span>高</button>
+                <button class="chip" data-priority="5"><span class="p-icon">⇈</span>紧急</button>
+              </div>
+            </div>
+
+            <!-- Tags -->
+            <div class="form-group">
+              <label class="form-label">标签</label>
+              <div class="tags-container" id="tags-container">
+                <input type="text" class="tag-input-field" id="new-tag-input">
+                <span class="tag-input-hint" id="tag-input-hint">按回车添加标签</span>
+                <!-- Emoji picker, like the ntfy web app's: a picked emoji is added as its tag -->
+                <button class="composer-btn emoji-btn" id="emoji-btn" type="button" title="添加表情"
+                  aria-label="添加表情" aria-expanded="false" aria-controls="emoji-picker">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5s.67 1.5 1.5 1.5zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- File Attachment -->
+            <div class="file-section">
+              <div class="file-input-wrapper">
+                <button class="file-btn" id="file-btn">
+                  📎 附加文件
+                </button>
+              </div>
+              <div class="file-preview" id="file-preview" aria-live="polite"></div>
+              <label class="switch-row zip-toggle" id="zip-toggle">
+                <span class="switch-copy">
+                  <span class="switch-title">将文件打包为一个 ZIP 发送</span>
+                  <span class="switch-hint">一条 ntfy 消息包含所有附件。</span>
+                </span>
+                <input type="checkbox" id="zip-checkbox" aria-label="将文件打包为一个 ZIP 发送">
+                <span class="switch" aria-hidden="true"><span></span></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Message bar, like the ntfy web app's. With the options open it is their footer:
+               the arrow to close them, Send another, and a labelled Send button. -->
+          <div class="composer-bar">
+            <button class="composer-btn" id="composer-toggle" title="更多选项" aria-expanded="false"
+              aria-controls="composer-options">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path d="M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+              </svg>
+            </button>
+            <!-- The message field with the link button in its corner; moves below the title with the options -->
+            <div class="composer-field" id="composer-field">
+              <textarea class="composer-input" id="message-input" rows="1" placeholder="在此输入消息"
+                aria-label="消息"></textarea>
+              <button class="composer-btn insert-url-btn" id="insert-url-btn" title="插入当前标签页网址"
+                aria-label="插入当前标签页网址">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" />
+                </svg>
+              </button>
+            </div>
+            <label class="send-another" title="发送后保持弹窗打开">
+              <input type="checkbox" id="send-another-checkbox">
+              <span>继续发送</span>
+            </label>
+            <button class="composer-btn send-btn" id="send-btn" title="发送">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+              <span class="send-label">发送</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings View: grouped in sections, saved automatically -->
+  <div class="view" id="settings-view">
+    <div class="main-content settings-content">
+      <section class="settings-section" id="settings-send-section" aria-labelledby="settings-send-title">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title" id="settings-send-title">发送</h2>
+          <label class="switch-row section-switch" title="开启后可以发送消息">
+            <input type="checkbox" id="send-checkbox" aria-label="启用发送">
+            <span class="switch" aria-hidden="true"><span></span></span>
+          </label>
+        </div>
+        <div class="settings-section-body" id="send-section-body" hidden>
+          <div class="settings-row">
+            <div class="form-group">
+              <label class="form-label" for="url-input">发送服务器地址</label>
+              <input type="text" class="form-input" id="url-input" placeholder="https://ntfy.sh">
+              <p class="form-hint">你的 ntfy 服务器基础地址</p>
+              <button class="chip" id="server-access-btn" style="display: none;">🔓 允许访问此服务器</button>
+              <p class="form-hint" id="server-access-hint" style="display: none;">你的发送服务器阻止了扩展的请求。允许访问后，扩展才能使用该服务器发送消息。</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="token-input">访问令牌（可选）</label>
+              <input type="password" class="form-input" id="token-input" placeholder="tk_...">
+              <p class="form-hint">用于私有主题或需要认证的服务器</p>
+            </div>
+
+            <div class="form-group credentials-group">
+              <label class="form-label" for="username-input">用户名和密码（可选）</label>
+              <div class="credentials-row">
+                <input type="text" class="form-input" id="username-input" placeholder="用户名" autocomplete="off"
+                  aria-label="用户名">
+                <input type="password" class="form-input" id="password-input" placeholder="密码" autocomplete="off"
+                  aria-label="密码">
+              </div>
+              <p class="form-hint">代替访问令牌使用。与令牌一样，仅保存在本设备上，所有订阅共用。</p>
+            </div>
+            <p class="form-hint insecure-hint" id="insecure-hint" hidden>服务器地址使用 http：访问令牌或
+              密码将以未加密方式传输。如果服务器支持，请使用 https。</p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">发送主题</label>
+            <div class="topics-container" id="topics-container">
+              <input type="text" class="topic-input-field" id="new-topic-input" aria-label="添加主题">
+              <span class="topic-input-hint" id="topic-input-hint">按回车添加主题</span>
+            </div>
+            <p class="form-hint">用于发送的主题。拖动可调整顺序。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-receiving-section" aria-labelledby="settings-receiving-title">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title" id="settings-receiving-title">接收与订阅</h2>
+          <label class="switch-row section-switch" title="开启后可以接收消息">
+            <input type="checkbox" id="receive-checkbox" aria-label="启用接收">
+            <span class="switch" aria-hidden="true"><span></span></span>
+          </label>
+        </div>
+        <div class="settings-section-body" id="receive-section-body" hidden>
+          <p class="form-hint receive-section-hint">开启后通过实时连接列出订阅主题中的消息，并显示桌面通知。</p>
+          <div class="subscriptions-list" id="subscriptions-list"></div>
+          <button class="chip add-subscription-btn" id="add-subscription-btn" type="button">＋ 添加订阅</button>
+          <p class="form-hint">每个订阅可以使用不同的服务器和主题；服务器留空则使用发送服务器，主题留空则使用发送主题。所有订阅共用上面的访问令牌或用户名密码。</p>
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="settings-appearance-title">
+        <h2 class="settings-section-title" id="settings-appearance-title">外观</h2>
+        <div class="settings-row">
+          <div class="form-group">
+            <div class="form-label">外观主题</div>
+            <div class="chips" id="theme-chips">
+              <button class="chip" data-theme="light">☀️ 浅色</button>
+              <button class="chip" data-theme="dark">🌙 深色</button>
+              <button class="chip active" data-theme="auto">🔄 自动</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">弹窗尺寸</div>
+            <div class="chips" id="size-chips">
+              <button class="chip" data-size="small">小</button>
+              <button class="chip active" data-size="medium">中</button>
+              <button class="chip" data-size="large">大</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="status" id="settings-status"></div>
+    </div>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+
+  <!-- Emoji picker of the tags field; floats above it, placed when opened -->
+  <div class="emoji-picker" id="emoji-picker" hidden>
+    <input type="search" class="emoji-search" id="emoji-search" placeholder="搜索表情" aria-label="搜索表情">
+    <div class="emoji-list" id="emoji-list"></div>
+  </div>
+  <script src="ntfy.js"></script>
+  <script src="zip.js"></script>
+  <script src="markdown.js"></script>
+  <script src="emojis.js"></script>
+  <script src="popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "发送到 ntfy",
+  "version": "3.3.0",
+  "description": "发送和接收 ntfy 通知：可添加多个订阅，支持文件附件、优先级、标签和已接收消息列表",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "contextMenus",
+    "scripting",
+    "notifications",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{cad379db-edfe-4c5e-b936-27a19156b5dc}",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

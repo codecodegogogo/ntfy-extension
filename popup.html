@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=600">
-  <title>发送到 ntfy</title>
+  <title>ntfy-extension</title>
   <link rel="stylesheet" href="styles.css">
   <style>
     /* Popup-specific layout */
@@ -13,6 +13,18 @@
     body {
       zoom: var(--ui-scale);
       width: calc(var(--popup-width) / var(--ui-scale));
+    }
+
+    /* No scrollbars anywhere in the popup: lists scroll without showing one */
+    * {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    *::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+      display: none;
     }
 
     .header {
@@ -31,7 +43,7 @@
     <div class="header-left">
       <div class="header-title">
         <img src="icons/icon48.png" alt="ntfy" style="width: 20px; height: 20px;">
-        <span id="header-text">Ntfy</span>
+        <span id="header-text">ntfy-extension</span>
       </div>
     </div>
     <div class="header-actions">
@@ -69,26 +81,36 @@
       </button>
     </div>
     <div class="main-content receive-layout">
-      <!-- Topic list: All topics (when receiving), then each configured topic -->
-      <nav class="topic-sidebar" id="topic-sidebar" aria-label="主题"></nav>
+      <!-- Topic list: All topics (when receiving), then each configured topic.
+           It is hidden by the list button next to the heading, which stays and expands it again. -->
+      <div class="topic-column" id="topic-column">
+        <nav class="topic-sidebar" id="topic-sidebar" aria-label="主题"></nav>
+      </div>
       <!-- Notifications Section -->
       <div class="notifications-section" id="notifications-section">
         <div class="section-header">
           <div class="section-heading">
             <span class="section-title" id="notifications-title">通知</span>
-            <!-- Notifications of the selected topic, or of all topics on All topics -->
-            <label class="switch-row notify-toggle" id="notify-toggle" hidden>
-              <svg class="notify-icon notify-icon-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
-                height="16" aria-hidden="true">
+            <!-- Notifications of the selected topic, or of all topics on All topics: an icon button
+                 like the header's, with a crossed-out bell while off -->
+            <label class="notify-toggle" id="notify-toggle" hidden title="通知">
+              <input type="checkbox" id="notify-checkbox" aria-label="接收通知">
+              <svg class="notify-icon notify-icon-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20"
+                height="20" aria-hidden="true">
                 <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z" />
               </svg>
-              <svg class="notify-icon notify-icon-off" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16"
-                height="16" aria-hidden="true">
+              <svg class="notify-icon notify-icon-off" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20"
+                height="20" aria-hidden="true">
                 <path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z" />
               </svg>
-              <input type="checkbox" id="notify-checkbox" aria-label="通知">
-              <span class="switch" aria-hidden="true"><span></span></span>
             </label>
+            <!-- Hides the whole topic list; stays here to bring it back -->
+            <button class="icon-btn topic-toggle-btn" id="sidebar-toggle-btn" type="button" title="隐藏主题列表"
+              aria-label="隐藏主题列表" aria-expanded="true">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+              </svg>
+            </button>
           </div>
           <div class="notifications-control-bar" id="notifications-control-bar" style="visibility: hidden;">
             <button class="control-btn" id="mark-all-read-btn" title="全部标为已读">✓ 全部标为已读</button>
@@ -218,43 +240,11 @@
           </label>
         </div>
         <div class="settings-section-body" id="send-section-body" hidden>
-          <div class="settings-row">
-            <div class="form-group">
-              <label class="form-label" for="url-input">发送服务器地址</label>
-              <input type="text" class="form-input" id="url-input" placeholder="https://ntfy.sh">
-              <p class="form-hint">你的 ntfy 服务器基础地址</p>
-              <button class="chip" id="server-access-btn" style="display: none;">🔓 允许访问此服务器</button>
-              <p class="form-hint" id="server-access-hint" style="display: none;">你的发送服务器阻止了扩展的请求。允许访问后，扩展才能使用该服务器发送消息。</p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="token-input">访问令牌（可选）</label>
-              <input type="password" class="form-input" id="token-input" placeholder="tk_...">
-              <p class="form-hint">用于私有主题或需要认证的服务器</p>
-            </div>
-
-            <div class="form-group credentials-group">
-              <label class="form-label" for="username-input">用户名和密码（可选）</label>
-              <div class="credentials-row">
-                <input type="text" class="form-input" id="username-input" placeholder="用户名" autocomplete="off"
-                  aria-label="用户名">
-                <input type="password" class="form-input" id="password-input" placeholder="密码" autocomplete="off"
-                  aria-label="密码">
-              </div>
-              <p class="form-hint">代替访问令牌使用。与令牌一样，仅保存在本设备上，所有订阅共用。</p>
-            </div>
-            <p class="form-hint insecure-hint" id="insecure-hint" hidden>服务器地址使用 http：访问令牌或
-              密码将以未加密方式传输。如果服务器支持，请使用 https。</p>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">发送主题</label>
-            <div class="topics-container" id="topics-container">
-              <input type="text" class="topic-input-field" id="new-topic-input" aria-label="添加主题">
-              <span class="topic-input-hint" id="topic-input-hint">按回车添加主题</span>
-            </div>
-            <p class="form-hint">用于发送的主题。拖动可调整顺序。</p>
-          </div>
+          <p class="form-hint">每个发送服务器可以有自己的地址、主题和访问凭据；发送时按所选主题找到对应服务器。</p>
+          <div class="subscriptions-list send-servers-list" id="send-servers-list"></div>
+          <button class="chip add-subscription-btn" id="add-send-server-btn" type="button">＋ 添加发送服务器</button>
+          <p class="form-hint insecure-hint" id="insecure-hint" hidden>有服务器地址使用 http：访问令牌或
+            密码将以未加密方式传输。如果服务器支持，请使用 https。</p>
         </div>
       </section>
 
@@ -270,7 +260,60 @@
           <p class="form-hint receive-section-hint">开启后通过实时连接列出订阅主题中的消息，并显示桌面通知。</p>
           <div class="subscriptions-list" id="subscriptions-list"></div>
           <button class="chip add-subscription-btn" id="add-subscription-btn" type="button">＋ 添加订阅</button>
-          <p class="form-hint">每个订阅可以使用不同的服务器和主题；服务器留空则使用发送服务器，主题留空则使用发送主题。所有订阅共用上面的访问令牌或用户名密码。</p>
+          <p class="form-hint">每个订阅可以使用不同的服务器和主题；服务器留空则使用第一个发送服务器，主题留空则使用同一服务器上的发送主题。每个订阅使用自己卡片里的凭据；订阅服务器与某个发送服务器相同时，凭据留空会使用那个发送服务器的凭据。</p>
+          <p class="form-hint access-denied-hint" id="access-denied-hint" hidden></p>
+          <p class="form-hint insecure-hint" id="receive-insecure-hint" hidden>有服务器地址使用 http：访问令牌或
+            密码将以未加密方式传输。如果服务器支持，请使用 https。</p>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-backup-section" aria-labelledby="settings-backup-title">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title" id="settings-backup-title">备份与还原</h2>
+          <label class="switch-row section-switch" title="启用 WebDAV 备份">
+            <input type="checkbox" id="backup-checkbox" aria-label="启用 WebDAV 备份">
+            <span class="switch" aria-hidden="true"><span></span></span>
+          </label>
+        </div>
+        <div class="settings-section-body" id="backup-section-body" hidden>
+          <p class="form-hint">把发送服务器、订阅、凭据和显示设置保存到 WebDAV 服务器，换电脑或重装后可以还原。消息记录和附件不在备份里。</p>
+
+          <div class="form-group">
+            <label class="form-label" for="backup-url-input">服务器地址</label>
+            <input type="text" class="form-input" id="backup-url-input" placeholder="例如 https://dav.example.com/remote.php/dav">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="backup-directory-input">备份目录（可选）</label>
+            <input type="text" class="form-input" id="backup-directory-input" placeholder="例如 ntfy-extension">
+            <p class="form-hint">留空则把备份文件放在服务器根目录；目录不存在时会自动创建。</p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">WebDAV 账号</label>
+            <div class="credentials-row">
+              <input type="text" class="form-input" id="backup-username-input" placeholder="用户名" autocomplete="off">
+              <input type="password" class="form-input" id="backup-password-input" placeholder="密码" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="backup-encrypt-password-input">备份加密密码（可选）</label>
+            <input type="password" class="form-input" id="backup-encrypt-password-input" placeholder="留空则明文保存" autocomplete="off">
+            <p class="form-hint">填写后备份文件会用 AES-GCM 加密，还原时需要同一个密码。备份里含有访问令牌，建议设置。</p>
+          </div>
+
+          <div class="backup-actions">
+            <button class="chip" id="backup-test-btn" type="button">测试连接</button>
+            <button class="chip" id="backup-upload-btn" type="button">☁ 立即备份</button>
+            <button class="chip" id="backup-restore-btn" type="button">⬇ 从服务器还原</button>
+            <button class="chip" id="backup-export-btn" type="button">导出到文件</button>
+            <button class="chip" id="backup-import-btn" type="button">从文件还原</button>
+            <input type="file" id="backup-import-file" accept="application/json,.json" hidden>
+          </div>
+
+          <p class="form-hint" id="backup-last-hint" hidden></p>
+          <p class="form-hint backup-warning" id="backup-warning-hint" hidden>还原会用备份覆盖当前设置，包括所有发送服务器、订阅和凭据。</p>
         </div>
       </section>
 
@@ -309,6 +352,7 @@
     <div class="emoji-list" id="emoji-list"></div>
   </div>
   <script src="ntfy.js"></script>
+  <script src="backup.js"></script>
   <script src="zip.js"></script>
   <script src="markdown.js"></script>
   <script src="emojis.js"></script>

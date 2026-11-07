@@ -789,6 +789,32 @@ strong {
     color: #f57c00;
 }
 
+/* Running work, e.g. a backup that is uploading */
+.status.info {
+    background-color: rgba(51, 133, 116, 0.1);
+    color: var(--text-secondary);
+}
+
+/* ========================================
+   WebDAV backup
+   ======================================== */
+
+.backup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 8px;
+}
+
+.backup-actions .chip:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.backup-warning {
+    color: #e53935;
+}
+
 /* ========================================
    Settings View
    ======================================== */
@@ -940,20 +966,56 @@ body.filepicker-page {
     white-space: nowrap;
 }
 
+/* Receiving switch in the heading: an icon button like the header's, with a bell (off: crossed out) */
 .notify-toggle {
     flex: none;
-    gap: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid transparent;
+    border-radius: 6px;
     color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
-.notify-toggle[hidden],
-.notify-toggle:has(input:checked) .notify-icon-off,
-.notify-toggle:has(input:not(:checked)) .notify-icon-on {
+.notify-toggle:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.notify-toggle:has(input:checked) {
+    color: var(--primary);
+}
+
+.notify-toggle:has(input:checked):hover {
+    color: var(--primary-light);
+}
+
+.notify-toggle[hidden] {
     display: none;
+}
+
+.notify-toggle input[type="checkbox"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.notify-toggle:has(input:focus-visible) {
+    border-color: var(--border-focus);
 }
 
 .notify-icon {
     fill: currentColor;
+}
+
+.notify-toggle:has(input:checked) .notify-icon-off,
+.notify-toggle:has(input:not(:checked)) .notify-icon-on {
+    display: none;
 }
 
 /* Off for all topics: a topic's switch can't turn them on */
@@ -968,7 +1030,7 @@ body.filepicker-page {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-right: 4px; /* space for scrollbar */
+    padding-right: 2px;
 }
 
 .notification-item {
@@ -1322,6 +1384,7 @@ body.filepicker-page {
 
 .notifications-control-bar {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 4px;
     padding: 0 4px;
@@ -1486,6 +1549,42 @@ body.filepicker-page {
     margin-bottom: 8px;
 }
 
+/* Optional credentials of a single subscription, collapsed unless one is set */
+.subscription-credentials {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.subscription-credentials summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.subscription-credentials summary:hover {
+    color: var(--primary);
+}
+
+.subscription-credentials .form-hint {
+    margin-top: 4px;
+}
+
+.subscription-credentials .form-input {
+    margin-top: 6px;
+}
+
+.subscription-credentials .credentials-row .form-input {
+    margin-top: 0;
+}
+
+/* The server refused the read request (401/403): say so in the settings */
+.access-denied-hint {
+    color: var(--notice-link);
+    margin-top: 6px;
+}
+
 /* A setting needed to send and receive, still empty */
 .settings-section.missing {
     border-color: var(--notice-border);
@@ -1536,7 +1635,7 @@ body.filepicker-page {
 }
 
 .settings-section .insecure-hint {
-    margin-top: -8px;
+    margin-top: 6px;
     color: #f44336;
     font-style: normal;
     opacity: 1;
@@ -1555,7 +1654,7 @@ body.filepicker-page {
     padding-bottom: 0;
 }
 
-.settings-section #server-access-btn,
+.settings-section .send-server-access-btn,
 .settings-section .subscription-access-btn {
     margin-top: 6px;
 }
@@ -1622,14 +1721,69 @@ body.filepicker-page {
     max-height: none;
 }
 
-.topic-sidebar {
+/* The topic list; the button that hides it sits in the heading's control bar */
+.topic-column {
     flex: 0 0 170px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    min-height: 0;
     padding-right: 8px;
     border-right: 1px solid var(--border-color);
+}
+
+.topic-sidebar {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     overflow-y: auto;
+}
+
+/* Same look as the header's icon buttons, on the popup's light background */
+.icon-btn.topic-toggle-btn {
+    width: 26px;
+    height: 26px;
+    margin-left: 2px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+}
+
+.icon-btn.topic-toggle-btn svg {
+    width: 18px;
+    height: 18px;
+    transition: transform 0.15s;
+}
+
+.icon-btn.topic-toggle-btn:hover:not(:disabled) {
+    background: var(--border-color);
+    color: var(--primary-light);
+}
+
+.icon-btn.topic-toggle-btn:active:not(:disabled) {
+    background: var(--border-color);
+}
+
+.icon-btn.topic-toggle-btn.collapsed svg {
+    transform: rotate(180deg);
+}
+
+/* Hidden topic list: the column goes away entirely, the toggle in the heading brings it back */
+#main-view.sidebar-hidden .topic-column {
+    display: none;
+}
+
+/* Double-click a topic to give it a remark; the field replaces its name while editing */
+.topic-remark-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    border: 1px solid var(--border-focus);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
 }
 
 .topic-filter-btn {

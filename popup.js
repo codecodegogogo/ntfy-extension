@@ -50,13 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsStatus: document.getElementById('settings-status'),
 
     // Settings inputs
-    urlInput: document.getElementById('url-input'),
-    tokenInput: document.getElementById('token-input'),
-    usernameInput: document.getElementById('username-input'),
-    passwordInput: document.getElementById('password-input'),
+    sendServersList: document.getElementById('send-servers-list'),
+    addSendServerBtn: document.getElementById('add-send-server-btn'),
     insecureHint: document.getElementById('insecure-hint'),
-    serverAccessBtn: document.getElementById('server-access-btn'),
-    serverAccessHint: document.getElementById('server-access-hint'),
+    receiveInsecureHint: document.getElementById('receive-insecure-hint'),
     sendCheckbox: document.getElementById('send-checkbox'),
     receiveCheckbox: document.getElementById('receive-checkbox'),
 
@@ -64,15 +61,31 @@ document.addEventListener('DOMContentLoaded', () => {
     receiveHint: document.getElementById('receive-hint'),
     receiveHintMessage: document.getElementById('receive-hint-message'),
     receiveHintDismiss: document.getElementById('receive-hint-dismiss'),
-    topicsContainer: document.getElementById('topics-container'),
-    newTopicInput: document.getElementById('new-topic-input'),
-    topicInputHint: document.getElementById('topic-input-hint'),
     subscriptionsList: document.getElementById('subscriptions-list'),
     addSubscriptionBtn: document.getElementById('add-subscription-btn'),
     sendSectionBody: document.getElementById('send-section-body'),
     receiveSectionBody: document.getElementById('receive-section-body'),
     sendSection: document.getElementById('settings-send-section'),
     receiveSection: document.getElementById('settings-receiving-section'),
+    accessDeniedHint: document.getElementById('access-denied-hint'),
+
+    // WebDAV backup
+    backupCheckbox: document.getElementById('backup-checkbox'),
+    backupSectionBody: document.getElementById('backup-section-body'),
+    backupUrlInput: document.getElementById('backup-url-input'),
+    backupDirectoryInput: document.getElementById('backup-directory-input'),
+    backupUsernameInput: document.getElementById('backup-username-input'),
+    backupPasswordInput: document.getElementById('backup-password-input'),
+    backupEncryptInput: document.getElementById('backup-encrypt-password-input'),
+    backupTestBtn: document.getElementById('backup-test-btn'),
+    backupUploadBtn: document.getElementById('backup-upload-btn'),
+    backupRestoreBtn: document.getElementById('backup-restore-btn'),
+    backupExportBtn: document.getElementById('backup-export-btn'),
+    backupImportBtn: document.getElementById('backup-import-btn'),
+    backupImportFile: document.getElementById('backup-import-file'),
+    backupLastHint: document.getElementById('backup-last-hint'),
+    backupWarningHint: document.getElementById('backup-warning-hint'),
+    backupSection: document.getElementById('settings-backup-section'),
 
     // Recent Notifications
     notificationsTitle: document.getElementById('notifications-title'),
@@ -80,7 +93,9 @@ document.addEventListener('DOMContentLoaded', () => {
     notifyCheckbox: document.getElementById('notify-checkbox'),
     notificationsSection: document.getElementById('notifications-section'),
     notificationsList: document.getElementById('notifications-list'),
+    topicColumn: document.getElementById('topic-column'),
     topicSidebar: document.getElementById('topic-sidebar'),
+    sidebarToggleBtn: document.getElementById('sidebar-toggle-btn'),
 
     // Bulk Actions Control Bar
     notificationsControlBar: document.getElementById('notifications-control-bar'),
@@ -90,12 +105,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let config = {
+    // The first send server's topics and URL, kept for the parts that use one server
     topics: [],
     apiUrl: '',
+    // Each send server has its own URL, topics and credentials
+    sendServers: [],
+    // Per-send-server credentials from storage.local, by send server id
+    sendServerCredentials: {},
     // Sending and receiving are switched on separately in the settings
     sendEnabled: false,
     // Each subscription has its own server and topics; empty values use the sending ones
     subscriptions: [],
+    // Per-subscription credentials from storage.local, by subscription id; empty fields use the send server's
+    subscriptionCredentials: {},
     accessToken: '',
     username: '',
     password: '',
@@ -104,7 +126,17 @@ document.addEventListener('DOMContentLoaded', () => {
     popupSize: 'medium',
     pageUrl: '',
     sendAsZipEnabled: false,
-    receiveEnabled: false
+    receiveEnabled: false,
+    // WebDAV backup settings, kept on this device: they hold the server's password
+    webdav: {
+      enabled: false,
+      url: '',
+      directory: '',
+      username: '',
+      password: '',
+      encryptPassword: '',
+      lastBackupAt: 0
+    }
   };
 
   let tags = []; // State for tags
@@ -117,17 +149,23 @@ document.addEventListener('DOMContentLoaded', () => {
   let listPointerDown = false; // A press on the Receive list, during which it must not be rebuilt
   let listRefreshPending = false;
   let listRefreshTimer = null;
-  let receiveFilter = 'all'; // Topic shown and sent to, or 'all' (nothing to send to)
+  // Key of the topic entry shown and sent to, or 'all' (nothing to send to)
+  let receiveFilter = 'all';
   let receiveHintDismissed = false; // The hint about the Receive messages setting is shown only once
   let currentNotifications = []; // Currently displayed notifications for the active topic
   let notificationsMuted = false; // Notifications off for all topics
   let mutedTopics = []; // Topics with notifications off
+  // Remarks shown instead of the topic names in the sidebar, by entry key
+  let topicRemarks = {};
+  // The topic list is collapsed to its toggle button
+  let sidebarHidden = false;
+  let readAccessDenied = {}; // Topics the server refused to read (401/403), by server, from the background
   let attachments = [];
 
   // Drag and drop state
   let dragSrcIndex = null;
   let dragType = null;
-  let dragSubscriptionId = null;
+  let dragGroupId = null;
 
   let selectedPriority = 3;
   let isSettingsView = false;
@@ -140,14 +178,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const SEND_AS_ZIP_SETTING_KEY = 'sendAsZipEnabled';
   // Synced settings; the access token is in storage.local (NtfyAPI.getAccessToken)
-  const STORAGE_KEYS = ['topics', 'apiUrl', 'sendEnabled', 'subscriptions', 'receiveApiUrl', 'receiveTopics', 'theme', 'priority', 'lastTags', 'sendAnotherEnabled', 'markdownEnabled', 'receiveEnabled', 'popupSize', SEND_AS_ZIP_SETTING_KEY];
+  const STORAGE_KEYS = ['topics', 'apiUrl', 'sendServers', 'sendEnabled', 'subscriptions', 'receiveApiUrl', 'receiveTopics', 'theme', 'priority', 'lastTags', 'sendAnotherEnabled', 'markdownEnabled', 'receiveEnabled', 'popupSize', SEND_AS_ZIP_SETTING_KEY];
   const POPUP_SIZES = ['small', 'medium', 'large'];
   // The size is also kept in localStorage, so it applies before the first paint
   // instead of after the asynchronous settings load
   const POPUP_SIZE_CACHE_KEY = 'popupSize';
+  const SIDEBAR_HIDDEN_KEY = 'sidebarHidden';
+  // WebDAV backup settings; kept on this device only, as they hold the server's password
+  const WEBDAV_KEY = 'webdavBackup';
 
   try {
     applyPopupSize(localStorage.getItem(POPUP_SIZE_CACHE_KEY));
+    sidebarHidden = localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1';
   } catch (e) {}
   const STORED_FILES_KEY = 'storedFiles';
   const LEGACY_STORED_FILE_KEY = 'storedFile';
@@ -167,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
   init();
 
   async function init() {
+    applySidebarVisibility();
     await loadConfig();
     await loadLocalState();
     await checkSessionAndCleanup(); // Check session and cleanup old files if needed
@@ -214,10 +257,34 @@ document.addEventListener('DOMContentLoaded', () => {
       // Before reading apiUrl: moves credentials out of it
       const credentials = await NtfyAPI.getServerCredentials();
       const items = await getFromStorage(STORAGE_KEYS);
+      const localSettings = await getFromStorageLocal(['subscriptionCredentials', 'sendServerCredentials', WEBDAV_KEY]);
       const accessToken = await NtfyAPI.getAccessToken();
       config.pageUrl = await getPageUrl();
       const apiUrl = NtfyAPI.normalizeServerUrl(items.apiUrl);
       const topics = NtfyAPI.parseTopics(items.topics);
+
+      // Send servers: older versions had one server and one topic list
+      let sendServers = NtfyAPI.parseSendServers(items.sendServers);
+      if (!sendServers) {
+        sendServers = [{ id: 'default', apiUrl, topics }];
+      }
+      if (sendServers.length === 0) {
+        sendServers = [createSendServer()];
+      }
+      // Before the per-server credentials existed, the shared fields held the first server's
+      let sendServerCredentials = localSettings.sendServerCredentials;
+      if (!sendServerCredentials || typeof sendServerCredentials !== 'object') {
+        sendServerCredentials = {
+          [sendServers[0].id]: {
+            accessToken: accessToken,
+            username: credentials.username,
+            password: credentials.password
+          }
+        };
+      }
+      const firstSendServer = sendServers[0];
+      const firstSendCredentials = sendServerCredentials[firstSendServer.id] || {};
+
       let subscriptions = NtfyAPI.parseSubscriptions(items.subscriptions);
       if (!subscriptions) {
         // Older versions had one subscription server and topic list
@@ -232,23 +299,28 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       config = {
         ...config,
-        topics,
-        apiUrl,
+        // The first server's values, for the code that still works with one server
+        topics: firstSendServer.topics,
+        apiUrl: NtfyAPI.normalizeServerUrl(firstSendServer.apiUrl),
+        sendServers,
+        sendServerCredentials,
         // Before the switches existed, a configured server and topics meant sending was on
         sendEnabled: items.sendEnabled === undefined
-          ? Boolean(apiUrl && topics.length > 0)
+          ? sendServers.some(server => server.apiUrl && server.topics.length > 0)
           : items.sendEnabled === true,
         subscriptions,
-        accessToken: accessToken,
-        username: credentials.username,
-        password: credentials.password,
+        subscriptionCredentials: localSettings.subscriptionCredentials || {},
+        accessToken: firstSendCredentials.accessToken || '',
+        username: firstSendCredentials.username || '',
+        password: firstSendCredentials.password || '',
 
         theme: items.theme || 'auto',
         popupSize: POPUP_SIZES.includes(items.popupSize) ? items.popupSize : 'medium',
         sendAnotherEnabled: items.sendAnotherEnabled === true,
         markdownEnabled: items.markdownEnabled === true,
         receiveEnabled: items.receiveEnabled === true,
-        sendAsZipEnabled: items[SEND_AS_ZIP_SETTING_KEY] === true
+        sendAsZipEnabled: items[SEND_AS_ZIP_SETTING_KEY] === true,
+        webdav: { ...config.webdav, ...(localSettings[WEBDAV_KEY] || {}) }
       };
 
       // Restore 'Send another' checkbox state
@@ -257,6 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.sendCheckbox.checked = config.sendEnabled;
       elements.receiveCheckbox.checked = config.receiveEnabled;
       elements.zipCheckbox.checked = config.sendAsZipEnabled;
+      fillBackupInputs();
       updateSettingsBodies();
 
       if (items.priority) {
@@ -274,17 +347,36 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function saveConfig() {
-    // Credentials typed into a server URL (https://user:password@host) move to their own fields: the URL
-    // is synced to other browsers, the credentials are kept on this device only
-    const server = NtfyAPI.splitServerUrl(elements.urlInput.value);
-    if (server.username || server.password) {
-      elements.urlInput.value = server.url;
-      elements.usernameInput.value = server.username;
-      elements.passwordInput.value = server.password;
-    }
+    // Read what is typed in the cards before saving
+    captureSendServerInputs();
+    captureSubscriptionInputs();
 
-    // Each subscription card's server field. Credentials in a subscription URL move to the shared
-    // fields too, unless those already hold values.
+    // Each send server card's URL. Credentials typed into it (https://user:password@host)
+    // move to that server's own fields: the URL is synced to other browsers, the credentials are
+    // kept on this device only.
+    const sendServers = config.sendServers.map(server => {
+      const input = sendServerUrlInput(server.id);
+      const split = input
+        ? NtfyAPI.splitServerUrl(input.value)
+        : { url: server.apiUrl, username: '', password: '' };
+      if (split.username || split.password) {
+        input.value = split.url;
+        const own = config.sendServerCredentials[server.id]
+          || (config.sendServerCredentials[server.id] = {
+            accessToken: '', username: '', password: ''
+          });
+        if (!own.username) own.username = split.username;
+        if (!own.password) own.password = split.password;
+        const usernameInput = sendServerCredentialInput(server.id, 'username');
+        const passwordInput = sendServerCredentialInput(server.id, 'password');
+        if (usernameInput && !usernameInput.value) usernameInput.value = split.username;
+        if (passwordInput && !passwordInput.value) passwordInput.value = split.password;
+      }
+      return { ...server, apiUrl: split.url };
+    });
+
+    // Each subscription card's server field. Credentials in a subscription URL move to that
+    // subscription's own fields, unless those already hold values.
     const subscriptions = config.subscriptions.map(subscription => {
       const input = subscriptionUrlInput(subscription.id);
       const split = input
@@ -292,28 +384,38 @@ document.addEventListener('DOMContentLoaded', () => {
         : { url: subscription.apiUrl, username: '', password: '' };
       if (split.username || split.password) {
         input.value = split.url;
-        if (!elements.usernameInput.value) {
-          elements.usernameInput.value = split.username;
-        }
-        if (!elements.passwordInput.value) {
-          elements.passwordInput.value = split.password;
-        }
+        const own = config.subscriptionCredentials[subscription.id]
+          || (config.subscriptionCredentials[subscription.id] = {
+            accessToken: '', username: '', password: ''
+          });
+        if (!own.username) own.username = split.username;
+        if (!own.password) own.password = split.password;
+        const usernameInput = subscriptionCredentialInput(subscription.id, 'username');
+        const passwordInput = subscriptionCredentialInput(subscription.id, 'password');
+        if (usernameInput && !usernameInput.value) usernameInput.value = split.username;
+        if (passwordInput && !passwordInput.value) passwordInput.value = split.password;
       }
       return { ...subscription, apiUrl: split.url };
     });
 
+    const firstSendServer = sendServers[0] || { apiUrl: '', topics: [] };
+    const firstSendCredentials = config.sendServerCredentials[firstSendServer.id] || {};
     const first = subscriptions[0] || { apiUrl: '', topics: [] };
+    // Per-server credentials stay on this device
+    const subscriptionCredentials = config.subscriptionCredentials;
+    const sendServerCredentials = config.sendServerCredentials;
     const newConfig = {
       // "ntfy.sh" is saved as "https://ntfy.sh"; the field keeps what was typed until the settings reopen
-      apiUrl: server.url,
-      accessToken: elements.tokenInput.value,
-      username: elements.usernameInput.value,
-      password: elements.passwordInput.value,
-      topics: config.topics.join(','), // Use current config state which is kept in sync
+      apiUrl: NtfyAPI.normalizeServerUrl(firstSendServer.apiUrl),
+      accessToken: firstSendCredentials.accessToken || '',
+      username: firstSendCredentials.username || '',
+      password: firstSendCredentials.password || '',
+      topics: firstSendServer.topics.join(','),
+      sendServers,
       sendEnabled: elements.sendCheckbox.checked,
       receiveEnabled: elements.receiveCheckbox.checked,
       subscriptions,
-      // Kept for older versions, which know only one subscription
+      // Kept for older versions, which know only one send server and one subscription
       receiveApiUrl: first.apiUrl,
       receiveTopics: first.topics.join(','),
 
@@ -327,21 +429,31 @@ document.addEventListener('DOMContentLoaded', () => {
       // The writes start right away, so they also complete when the popup is closing
       await Promise.all([
         saveToStorage(syncedSettings),
+        saveToStorageLocal({ subscriptionCredentials, sendServerCredentials }),
         NtfyAPI.setAccessToken(accessToken),
         NtfyAPI.setServerCredentials(username, password)
       ]);
       config = {
         ...config,
         ...newConfig,
-        topics: NtfyAPI.parseTopics(newConfig.topics),
-        subscriptions
+        // The first send server's values, for the code that still works with one server
+        apiUrl: NtfyAPI.normalizeServerUrl(firstSendServer.apiUrl),
+        topics: firstSendServer.topics,
+        accessToken: firstSendCredentials.accessToken || '',
+        username: firstSendCredentials.username || '',
+        password: firstSendCredentials.password || '',
+        sendServers,
+        sendServerCredentials,
+        subscriptions,
+        subscriptionCredentials
       };
 
       // We don't want to full updateUI here because it might disrupt typing
-      renderTopics(); // Re-render to ensure state consistency
       updateSettingsBodies();
       updateThemeChipsUI(); // Ensure UI reflects state
       updateSizeChipsUI();
+      updateInsecureHint();
+      updateMissingSettings();
       updateServerAccessUI();
 
     } catch (error) {
@@ -375,12 +487,232 @@ document.addEventListener('DOMContentLoaded', () => {
   // Settings typed in the server and token fields
   const debouncedSave = debounce(saveConfig, 1000);
 
+  // ==================
+  // WebDAV backup
+  // ==================
+
+  function fillBackupInputs() {
+    const webdav = config.webdav;
+    elements.backupCheckbox.checked = webdav.enabled;
+    elements.backupUrlInput.value = webdav.url || '';
+    elements.backupDirectoryInput.value = webdav.directory || '';
+    elements.backupUsernameInput.value = webdav.username || '';
+    elements.backupPasswordInput.value = webdav.password || '';
+    elements.backupEncryptInput.value = webdav.encryptPassword || '';
+    updateBackupLastHint();
+  }
+
+  // Reads what is typed in the backup section; called before the settings are saved
+  function captureBackupInputs() {
+    config.webdav = {
+      ...config.webdav,
+      enabled: elements.backupCheckbox.checked,
+      url: elements.backupUrlInput.value.trim(),
+      directory: elements.backupDirectoryInput.value.trim(),
+      username: elements.backupUsernameInput.value,
+      password: elements.backupPasswordInput.value,
+      encryptPassword: elements.backupEncryptInput.value
+    };
+  }
+
+  // The backup server's address and credentials stay on this device
+  async function saveWebdavSettings() {
+    captureBackupInputs();
+    try {
+      await saveToStorageLocal({ [WEBDAV_KEY]: config.webdav });
+    } catch (error) {
+      showSettingsStatus(`保存备份设置失败：${error.message}`, 'error');
+    }
+  }
+
+  function updateBackupLastHint() {
+    const at = config.webdav.lastBackupAt;
+    elements.backupLastHint.hidden = !at;
+    if (at) {
+      elements.backupLastHint.textContent = `上次备份：${new Date(at).toLocaleString('zh-CN')}`;
+    }
+    // The warning belongs next to the buttons once there is a server to restore from
+    elements.backupWarningHint.hidden = !elements.backupUrlInput.value.trim();
+  }
+
+  function setBackupBusy(busy, message) {
+    [elements.backupTestBtn, elements.backupUploadBtn, elements.backupRestoreBtn,
+      elements.backupExportBtn, elements.backupImportBtn].forEach(btn => {
+      btn.disabled = busy;
+    });
+    if (message) {
+      showSettingsStatus(message, 'info');
+    }
+  }
+
+  // The WebDAV settings as the backup module expects them
+  function webdavOptions() {
+    captureBackupInputs();
+    return {
+      url: config.webdav.url,
+      directory: config.webdav.directory,
+      username: config.webdav.username,
+      password: config.webdav.password
+    };
+  }
+
+  // WebDAV servers usually don't allow cross-origin requests, so the extension needs access to
+  // the server's site. Asked for directly from the click, where the browser allows the prompt.
+  function requestWebdavAccess(url) {
+    return new Promise(resolve => {
+      const pattern = NtfyAPI.serverOriginPattern(url);
+      if (!pattern) {
+        resolve(false);
+        return;
+      }
+      chrome.permissions.request({ origins: [pattern] }, granted => resolve(Boolean(granted)));
+    });
+  }
+
+  async function handleBackupTest() {
+    const options = webdavOptions();
+    if (!options.url) {
+      showSettingsStatus('请先填写 WebDAV 服务器地址', 'warning');
+      elements.backupUrlInput.focus();
+      return;
+    }
+    if (!(await requestWebdavAccess(options.url))) {
+      showSettingsStatus('未获得该 WebDAV 服务器的访问权限', 'error');
+      return;
+    }
+    setBackupBusy(true, '正在测试连接…');
+    try {
+      await NtfyBackup.test(options);
+      await saveWebdavSettings();
+      showSettingsStatus('连接成功', 'success');
+    } catch (error) {
+      showSettingsStatus(error.message, 'error');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  // Runs right away what is still pending in the settings, so the backup holds what is on screen
+  async function commitSettingsBeforeBackup() {
+    addAllSendServerTopicsFromInputs();
+    addAllSubscriptionTopicsFromInputs();
+    debouncedSave.cancel();
+    await saveConfig();
+  }
+
+  async function handleBackupUpload() {
+    const options = webdavOptions();
+    if (!options.url) {
+      showSettingsStatus('请先填写 WebDAV 服务器地址', 'warning');
+      elements.backupUrlInput.focus();
+      return;
+    }
+    if (!(await requestWebdavAccess(options.url))) {
+      showSettingsStatus('未获得该 WebDAV 服务器的访问权限', 'error');
+      return;
+    }
+    setBackupBusy(true, '正在备份…');
+    try {
+      await commitSettingsBeforeBackup();
+      const backup = await NtfyBackup.collect();
+      const { text, encrypted } = await NtfyBackup.serialize(backup, config.webdav.encryptPassword);
+      const fileUrl = await NtfyBackup.upload({ ...options, text });
+      config.webdav.lastBackupAt = Date.now();
+      await saveWebdavSettings();
+      updateBackupLastHint();
+      const host = new URL(fileUrl).host;
+      showSettingsStatus(`备份成功：${host}${new URL(fileUrl).pathname}${encrypted ? '（已加密）' : ''}`, 'success');
+    } catch (error) {
+      showSettingsStatus(`备份失败：${error.message}`, 'error');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function restoreBackupText(text) {
+    const backup = await NtfyBackup.parse(text, config.webdav.encryptPassword);
+    await NtfyBackup.apply(backup);
+  }
+
+  async function handleBackupRestore() {
+    const options = webdavOptions();
+    if (!options.url) {
+      showSettingsStatus('请先填写 WebDAV 服务器地址', 'warning');
+      elements.backupUrlInput.focus();
+      return;
+    }
+    if (!(await requestWebdavAccess(options.url))) {
+      showSettingsStatus('未获得该 WebDAV 服务器的访问权限', 'error');
+      return;
+    }
+    if (!window.confirm('从服务器还原会覆盖当前的所有设置（发送服务器、订阅、凭据），确定继续吗？')) {
+      return;
+    }
+    setBackupBusy(true, '正在还原…');
+    try {
+      const text = await NtfyBackup.download(options);
+      await restoreBackupText(text);
+      showSettingsStatus('还原成功，正在重新载入设置…', 'success');
+      setTimeout(() => window.location.reload(), 600);
+    } catch (error) {
+      setBackupBusy(false);
+      showSettingsStatus(`还原失败：${error.message}`, 'error');
+    }
+  }
+
+  async function handleBackupExport() {
+    setBackupBusy(true);
+    try {
+      await commitSettingsBeforeBackup();
+      const backup = await NtfyBackup.collect();
+      const { text } = await NtfyBackup.serialize(backup, config.webdav.encryptPassword);
+      const blobUrl = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const date = new Date().toISOString().slice(0, 10);
+      link.download = `ntfy-extension-backup-${date}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      showSettingsStatus('备份文件已导出', 'success');
+    } catch (error) {
+      showSettingsStatus(`导出失败：${error.message}`, 'error');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  function handleBackupImportClick() {
+    elements.backupImportFile.value = '';
+    elements.backupImportFile.click();
+  }
+
+  async function handleBackupImport(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!window.confirm('从文件还原会覆盖当前的所有设置（发送服务器、订阅、凭据），确定继续吗？')) {
+      return;
+    }
+    setBackupBusy(true, '正在还原…');
+    try {
+      const text = await file.text();
+      await restoreBackupText(text);
+      showSettingsStatus('还原成功，正在重新载入设置…', 'success');
+      setTimeout(() => window.location.reload(), 600);
+    } catch (error) {
+      setBackupBusy(false);
+      showSettingsStatus(`还原失败：${error.message}`, 'error');
+    }
+  }
+
   // The popup closes on any click outside it, often right after typing, and its timers end with it.
   // Save what is still pending: chrome.storage writes started now still complete.
   function savePendingChanges() {
     if (isSettingsView) {
-      addTopicFromInput(); // A topic typed without Enter
+      addAllSendServerTopicsFromInputs(); // Topics typed without Enter
       addAllSubscriptionTopicsFromInputs();
+      saveWebdavSettings();
     }
     debouncedSave.flush();
     if (draftSaveTimer !== null) {
@@ -395,13 +727,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Asked for only once the server's CORS headers blocked a request (NtfyAPI.checkServerAccessBlocked):
   // most servers, ntfy itself included, let the extension through. Covers both the sending and the
   // subscription server.
-  let missingServerPattern = null;
   async function updateServerAccessUI() {
-    const sendPattern = NtfyAPI.serverOriginPattern(config.apiUrl);
+    const sendPatterns = config.sendServers
+      .map(server => NtfyAPI.serverOriginPattern(server.apiUrl))
+      .filter(Boolean);
     const subscriptionPatterns = resolvedSubscriptions()
       .map(subscription => NtfyAPI.serverOriginPattern(subscription.apiUrl))
-      .filter(pattern => pattern && pattern !== sendPattern);
-    const patterns = [...new Set([sendPattern, ...subscriptionPatterns].filter(Boolean))];
+      .filter(pattern => pattern && !sendPatterns.includes(pattern));
+    const patterns = [...new Set([...sendPatterns, ...subscriptionPatterns])];
     let missingPattern = null;
     try {
       const { serverAccessBlocked } = await chrome.storage.local.get('serverAccessBlocked');
@@ -413,24 +746,32 @@ document.addEventListener('DOMContentLoaded', () => {
       missingPattern = null;
     }
 
-    missingServerPattern = missingPattern;
     serverAccessMissing = Boolean(missingPattern);
-    const sendMissing = Boolean(missingPattern && missingPattern === sendPattern);
+
+    // Each send server card gets its own button when its server was blocked
+    let sendMissing = false;
+    elements.sendServersList.querySelectorAll('.send-server-card').forEach(card => {
+      const server = findSendServer(card.dataset.sendServerId);
+      const pattern = server ? NtfyAPI.serverOriginPattern(server.apiUrl) : null;
+      const show = Boolean(missingPattern && pattern === missingPattern);
+      const btn = card.querySelector('.send-server-access-btn');
+      const hint = card.querySelector('.send-server-access-hint');
+      if (btn) btn.style.display = show ? '' : 'none';
+      if (hint) hint.style.display = show ? '' : 'none';
+      if (show) sendMissing = true;
+    });
     sendServerAccessMissing = sendMissing;
-    elements.serverAccessBtn.style.display = sendMissing ? '' : 'none';
-    elements.serverAccessHint.style.display = sendMissing ? '' : 'none';
 
     // Each subscription card gets its own button when its server was blocked. A subscription that
-    // uses the sending server is covered by the sending section's button.
+    // uses a sending server is covered by that server's card while the sending section is open.
     let receiveMissing = false;
     elements.subscriptionsList.querySelectorAll('.subscription-card').forEach(card => {
       const subscription = findSubscription(card.dataset.subscriptionId);
       const pattern = subscription
         ? NtfyAPI.serverOriginPattern(resolvedSubscription(subscription).apiUrl)
         : null;
-      // The sending section's button covers its server only while that section is open
-      const show = Boolean(missingPattern && pattern === missingPattern
-        && (pattern !== sendPattern || !elements.sendCheckbox.checked));
+      const coveredBySend = Boolean(sendPatterns.includes(pattern) && elements.sendCheckbox.checked);
+      const show = Boolean(missingPattern && pattern === missingPattern && !coveredBySend);
       const btn = card.querySelector('.subscription-access-btn');
       const hint = card.querySelector('.subscription-access-hint');
       if (btn) btn.style.display = show ? '' : 'none';
@@ -442,8 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateMissingSettings();
   }
 
-  function requestServerAccess() {
-    const pattern = missingServerPattern || NtfyAPI.serverOriginPattern(elements.urlInput.value.trim());
+  function requestServerAccess(pattern) {
     if (!pattern) {
       return;
     }
@@ -901,22 +1241,6 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.settingsBtn.addEventListener('click', showSettingsView);
     elements.backBtn.addEventListener('click', leaveSettings);
 
-    // Settings Auto-save: while typing, and right away when the field is left
-    elements.urlInput.addEventListener('input', () => {
-      updateMissingSettings();
-      updateInsecureHint();
-      debouncedSave();
-    });
-    elements.urlInput.addEventListener('change', debouncedSave.flush);
-
-    [elements.tokenInput, elements.usernameInput, elements.passwordInput].forEach(input => {
-      input.addEventListener('input', () => {
-        updateInsecureHint();
-        debouncedSave();
-      });
-      input.addEventListener('change', debouncedSave.flush);
-    });
-
     window.addEventListener('pagehide', savePendingChanges);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
@@ -928,8 +1252,10 @@ document.addEventListener('DOMContentLoaded', () => {
       updateSettingsBodies();
       updateMissingSettings();
       saveConfig();
-      if (elements.sendCheckbox.checked && !elements.urlInput.value.trim()) {
-        elements.urlInput.focus();
+      const firstSendServer = config.sendServers[0];
+      const firstSendUrl = firstSendServer ? sendServerUrlInput(firstSendServer.id) : null;
+      if (elements.sendCheckbox.checked && firstSendUrl && !firstSendUrl.value.trim()) {
+        firstSendUrl.focus();
       }
     });
 
@@ -942,8 +1268,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.receiveHintDismiss.addEventListener('click', dismissReceiveHint);
 
-    elements.serverAccessBtn.addEventListener('click', requestServerAccess);
+    elements.addSendServerBtn.addEventListener('click', addSendServer);
     elements.addSubscriptionBtn.addEventListener('click', addSubscription);
+    elements.sidebarToggleBtn.addEventListener('click', toggleSidebar);
+
+    // WebDAV backup
+    elements.backupCheckbox.addEventListener('change', () => {
+      updateSettingsBodies();
+      saveWebdavSettings();
+    });
+    [elements.backupUrlInput, elements.backupDirectoryInput, elements.backupUsernameInput,
+      elements.backupPasswordInput, elements.backupEncryptInput].forEach(input => {
+      input.addEventListener('change', saveWebdavSettings);
+      input.addEventListener('input', updateBackupLastHint);
+    });
+    elements.backupTestBtn.addEventListener('click', handleBackupTest);
+    elements.backupUploadBtn.addEventListener('click', handleBackupUpload);
+    elements.backupRestoreBtn.addEventListener('click', handleBackupRestore);
+    elements.backupExportBtn.addEventListener('click', handleBackupExport);
+    elements.backupImportBtn.addEventListener('click', handleBackupImportClick);
+    elements.backupImportFile.addEventListener('change', handleBackupImport);
 
     // Keep the composer text available if the popup closes before sending.
     elements.titleInput.addEventListener('input', () => {
@@ -965,12 +1309,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-
-    // Topics handling (badges)
-    elements.newTopicInput.addEventListener('keydown', handleTopicKeydown);
-    elements.newTopicInput.addEventListener('blur', addTopicFromInput);
-    elements.newTopicInput.addEventListener('input', updateTopicInputHint);
-    elements.topicsContainer.addEventListener('click', handleTopicRemove);
 
     // Theme chips
     elements.sizeChips.addEventListener('click', handleSizeChange);
@@ -1047,6 +1385,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (changes.serverAccessBlocked) {
           updateServerAccessUI();
         }
+        if (changes.readAccessDenied) {
+          readAccessDenied = changes.readAccessDenied.newValue || {};
+          updateAccessDeniedHint();
+          scheduleNotificationsRefresh();
+        }
       }
     });
 
@@ -1114,17 +1457,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showSettingsView() {
-    // Populate settings fields with current config
-    elements.urlInput.value = config.apiUrl;
-    elements.tokenInput.value = config.accessToken;
-    elements.usernameInput.value = config.username;
-    elements.passwordInput.value = config.password;
     elements.sendCheckbox.checked = config.sendEnabled;
     elements.receiveCheckbox.checked = config.receiveEnabled;
+    fillBackupInputs();
     updateSettingsBodies();
-    updateInsecureHint();
-    renderTopics(); // Render badges
+    renderSendServers(); // Render send server cards
     renderSubscriptions();
+    updateInsecureHint();
     updateServerAccessUI();
 
     updateThemeChipsUI();
@@ -1134,12 +1473,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // During setup, start in the first setting still missing
     updateMissingSettings();
-    if (config.sendEnabled && !elements.urlInput.value.trim()) {
-      elements.urlInput.focus();
-    } else if (config.sendEnabled && config.topics.length === 0) {
-      elements.newTopicInput.focus();
+    const firstSendServer = config.sendServers[0];
+    const firstSendUrl = firstSendServer ? sendServerUrlInput(firstSendServer.id) : null;
+    if (config.sendEnabled && firstSendUrl && !firstSendUrl.value.trim()) {
+      firstSendUrl.focus();
+    } else if (config.sendEnabled && allSendTopics().length === 0) {
+      const server = config.sendServers.find(candidate => candidate.apiUrl) || firstSendServer;
+      const topicInput = server ? sendServerTopicInput(server.id) : null;
+      if (topicInput) topicInput.focus();
     } else if (serverAccessMissing) {
-      elements.serverAccessBtn.focus();
+      const accessButton = [...elements.settingsView.querySelectorAll('.send-server-access-btn, .subscription-access-btn')]
+        .find(button => button.style.display !== 'none');
+      if (accessButton) accessButton.focus();
     } else if (config.receiveEnabled && effectiveSubscriptions().length === 0) {
       elements.addSubscriptionBtn.focus();
     }
@@ -1147,20 +1492,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Credentials over http are readable by anyone on the way to the server
   function updateInsecureHint() {
-    const hasCredentials = [elements.tokenInput, elements.usernameInput, elements.passwordInput]
-      .some(input => input.value !== '');
-    const urls = [elements.urlInput.value, ...subscriptionUrlValues()]
-      .map(url => NtfyAPI.normalizeServerUrl(url))
-      .filter(Boolean);
-    elements.insecureHint.hidden = !(hasCredentials && urls.some(url => /^http:\/\//i.test(url)));
+    const credentialInputs = [
+      ...elements.sendServersList.querySelectorAll('.send-server-credential-input'),
+      ...elements.subscriptionsList.querySelectorAll('.subscription-credential-input')
+    ];
+    const hasCredentials = credentialInputs.some(input => input.value !== '');
+    const urls = [
+      ...[...elements.sendServersList.querySelectorAll('.send-server-url-input')].map(input => input.value),
+      ...subscriptionUrlValues()
+    ].map(url => NtfyAPI.normalizeServerUrl(url)).filter(Boolean);
+    const show = hasCredentials && urls.some(url => /^http:\/\//i.test(url));
+    elements.insecureHint.hidden = !show;
+    elements.receiveInsecureHint.hidden = !show;
   }
 
   // Marks the settings needed to send and receive while they are empty, and the server while
   // its access token can't be used yet (same conditions as the settings button highlight)
   function updateMissingSettings() {
+    const sendReady = config.sendServers.some(server =>
+      server.apiUrl.trim() && server.topics.length > 0);
+    const sendIncomplete = config.sendServers.some(server =>
+      (server.apiUrl.trim() || server.topics.length > 0)
+      && !(server.apiUrl.trim() && server.topics.length > 0));
     elements.sendSection.classList.toggle('missing',
       elements.sendCheckbox.checked
-        && (!elements.urlInput.value.trim() || config.topics.length === 0 || sendServerAccessMissing));
+        && (!sendReady || sendIncomplete || sendServerAccessMissing));
     elements.receiveSection.classList.toggle('missing',
       elements.receiveCheckbox.checked
         && (effectiveSubscriptions().length === 0 || receiveServerAccessMissing));
@@ -1170,13 +1526,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateSettingsBodies() {
     elements.sendSectionBody.hidden = !elements.sendCheckbox.checked;
     elements.receiveSectionBody.hidden = !elements.receiveCheckbox.checked;
+    elements.backupSectionBody.hidden = !elements.backupCheckbox.checked;
+    updateAccessDeniedHint();
   }
 
   // Saves right away what is still pending (typed topic, debounced URL or token), so the main
   // view shows the settings as entered
   async function leaveSettings() {
-    if (!addTopicFromInput()) {
-      elements.newTopicInput.focus();
+    if (!addAllSendServerTopicsFromInputs()) {
       return;
     }
     if (!addAllSubscriptionTopicsFromInputs()) {
@@ -1195,13 +1552,33 @@ document.addEventListener('DOMContentLoaded', () => {
     loadNotifications();
   }
 
+  // Hides the topic list with the button in the heading's control bar. The selected topic stays
+  // selected, so its messages stay visible.
+  function toggleSidebar() {
+    sidebarHidden = !sidebarHidden;
+    applySidebarVisibility();
+    try {
+      localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function applySidebarVisibility() {
+    elements.mainView.classList.toggle('sidebar-hidden', sidebarHidden);
+    elements.sidebarToggleBtn.classList.toggle('collapsed', sidebarHidden);
+    const label = sidebarHidden ? '显示主题列表' : '隐藏主题列表';
+    elements.sidebarToggleBtn.title = label;
+    elements.sidebarToggleBtn.setAttribute('aria-label', label);
+    elements.sidebarToggleBtn.setAttribute('aria-expanded', String(!sidebarHidden));
+  }
+
   // ==================
   // UI Updates
   // ==================
 
   // Sending or receiving is set up: at least one of the two has a server and a topic
   function isConfigured() {
-    const sendConfigured = Boolean(config.sendEnabled && config.apiUrl && config.topics.length > 0);
+    const sendConfigured = Boolean(config.sendEnabled && config.sendServers.some(server =>
+      NtfyAPI.normalizeServerUrl(server.apiUrl) && server.topics.length > 0));
     const receiveConfigured = Boolean(config.receiveEnabled && effectiveSubscriptions().length > 0);
     return sendConfigured || receiveConfigured;
   }
@@ -1211,7 +1588,8 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.settingsBtn.classList.toggle('highlight', !isConfigured() || serverAccessMissing);
 
     // Enable/disable the open URL button based on the features that are switched on
-    const canOpen = (config.sendEnabled && config.apiUrl)
+    const canOpen = (config.sendEnabled
+      && config.sendServers.some(server => NtfyAPI.normalizeServerUrl(server.apiUrl)))
       || (config.receiveEnabled && effectiveSubscriptions().length > 0);
     elements.openUrlBtn.disabled = !canOpen;
 
@@ -1221,11 +1599,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // The composer sends to the selected topic, so it is there only while one is: a topic configured
   // for sending. Without receiving there are no messages to show, so its options are always open.
   function updateComposer() {
-    const topic = receiveFilter !== 'all' ? receiveFilter : null;
-    const canSend = Boolean(config.sendEnabled && topic && config.apiUrl && config.topics.includes(topic));
+    const entry = currentTopicEntry();
+    const topic = entry && entry.kind !== 'all' ? entry.topic : null;
+    const canSend = Boolean(config.sendEnabled && topic && sendServerForTopic(topic));
     elements.composer.hidden = !canSend;
     elements.composerToggle.hidden = !config.receiveEnabled;
-    elements.notificationsTitle.textContent = topic || '全部主题';
+    elements.notificationsTitle.textContent = entry ? topicEntryLabel(entry) : '全部主题';
     const optionsOpen = elements.composer.classList.contains('options-open');
     if (!config.receiveEnabled) {
       if (!optionsOpen) {
@@ -1311,13 +1690,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Drag and Drop
   // ==================
 
-  function setupDragAndDrop(element, index, type, subscriptionId = null) {
+  function setupDragAndDrop(element, index, type, groupId = null) {
     element.draggable = true;
 
     element.addEventListener('dragstart', (e) => {
       dragSrcIndex = index;
       dragType = type;
-      dragSubscriptionId = subscriptionId;
+      dragGroupId = groupId;
       element.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', index);
@@ -1328,7 +1707,7 @@ document.addEventListener('DOMContentLoaded', () => {
       element.classList.remove('drag-over');
       dragSrcIndex = null;
       dragType = null;
-      dragSubscriptionId = null;
+      dragGroupId = null;
     });
 
     element.addEventListener('dragover', (e) => {
@@ -1340,7 +1719,7 @@ document.addEventListener('DOMContentLoaded', () => {
     element.addEventListener('dragenter', (e) => {
       e.preventDefault();
       if (dragType === type && dragSrcIndex !== index
-        && (type !== 'subscriptionTopic' || dragSubscriptionId === subscriptionId)) {
+        && (!['subscriptionTopic', 'sendTopic'].includes(type) || dragGroupId === groupId)) {
         element.classList.add('drag-over');
       }
     });
@@ -1356,7 +1735,7 @@ document.addEventListener('DOMContentLoaded', () => {
       element.classList.remove('drag-over');
 
       if (dragType !== type) return;
-      if (type === 'subscriptionTopic' && dragSubscriptionId !== subscriptionId) return;
+      if ((type === 'subscriptionTopic' || type === 'sendTopic') && dragGroupId !== groupId) return;
       if (dragSrcIndex === null) return;
       if (dragSrcIndex === index) return;
 
@@ -1373,7 +1752,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const srcIdx = dragSrcIndex;
       dragSrcIndex = null;
       dragType = null;
-      dragSubscriptionId = null;
+      dragGroupId = null;
 
       if (type === 'tag') {
         const item = tags[srcIdx];
@@ -1381,14 +1760,17 @@ document.addEventListener('DOMContentLoaded', () => {
         tags.splice(index, 0, item);
         renderTags();
         saveToStorage({ lastTags: [...tags] });
-      } else if (type === 'topic') {
-        const item = config.topics[srcIdx];
-        config.topics.splice(srcIdx, 1);
-        config.topics.splice(index, 0, item);
-        renderTopics();
+      } else if (type === 'sendTopic') {
+        const server = findSendServer(groupId);
+        if (!server) return;
+        const item = server.topics[srcIdx];
+        server.topics.splice(srcIdx, 1);
+        server.topics.splice(index, 0, item);
+        renderSendServers();
         saveConfig();
+        updateServerAccessUI();
       } else if (type === 'subscriptionTopic') {
-        const subscription = findSubscription(subscriptionId);
+        const subscription = findSubscription(groupId);
         if (!subscription) return;
         const item = subscription.topics[srcIdx];
         subscription.topics.splice(srcIdx, 1);
@@ -1561,12 +1943,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Topics Handling
   // ==================
 
-  // A subscription as it is used: its server and topics fall back to the sending ones
+  // A subscription as it is used: its server falls back to the first send server, its topics to
+  // that server's sending topics
   function resolvedSubscription(subscription) {
+    const apiUrl = NtfyAPI.normalizeServerUrl(subscription.apiUrl) || config.apiUrl;
+    const sendServer = config.sendServers.find(server =>
+      NtfyAPI.normalizeServerUrl(server.apiUrl) === apiUrl);
     return {
       id: subscription.id,
-      apiUrl: NtfyAPI.normalizeServerUrl(subscription.apiUrl) || config.apiUrl,
-      topics: subscription.topics.length > 0 ? subscription.topics : config.topics
+      apiUrl,
+      topics: subscription.topics.length > 0
+        ? subscription.topics
+        : (sendServer ? sendServer.topics : config.topics)
     };
   }
 
@@ -1601,18 +1989,59 @@ document.addEventListener('DOMContentLoaded', () => {
     return topics;
   }
 
-  // Topics shown in the main view: sending topics while sending is on, plus subscription topics
-  // while receiving is on
-  function viewTopics() {
-    const topics = config.sendEnabled ? [...config.topics] : [];
+  // The topic list of the main view: All topics (when receiving), one entry per subscription topic,
+  // then the sending topics that no subscription receives. Topics of different subscriptions stay
+  // apart even when they have the same name; a remark can tell them apart.
+  function topicEntries() {
+    const entries = [];
     if (config.receiveEnabled) {
-      effectiveReceiveTopics().forEach(topic => {
-        if (!topics.includes(topic)) {
-          topics.push(topic);
+      entries.push({ key: 'all', kind: 'all', topic: 'all' });
+      effectiveSubscriptions().forEach(subscription => {
+        subscription.topics.forEach(topic => {
+          entries.push({
+            key: `sub:${subscription.id}:${topic}`,
+            kind: 'subscription',
+            topic,
+            apiUrl: subscription.apiUrl
+          });
+        });
+      });
+    }
+    if (config.sendEnabled) {
+      allSendTopics().forEach(topic => {
+        if (!entries.some(entry => entry.kind !== 'all' && entry.topic === topic)) {
+          entries.push({ key: `send:${topic}`, kind: 'send', topic });
         }
       });
     }
-    return topics;
+    return entries;
+  }
+
+  function findTopicEntry(key) {
+    return topicEntries().find(entry => entry.key === key) || null;
+  }
+
+  function currentTopicEntry() {
+    return findTopicEntry(receiveFilter);
+  }
+
+  // What the sidebar shows for an entry: its remark, or the topic name
+  function topicEntryLabel(entry) {
+    if (entry.kind === 'all') {
+      return '全部主题';
+    }
+    return topicRemarks[entry.key] || entry.topic;
+  }
+
+  // Whether a received message belongs to a sidebar entry. Two subscriptions may receive the same
+  // topic name from different servers, so their messages stay apart.
+  function matchesTopicEntry(notification, entry) {
+    if (!entry) return false;
+    if (entry.kind === 'all') return true;
+    if (notification.topic !== entry.topic) return false;
+    return entry.kind !== 'subscription'
+      || !notification.server
+      || notification.server === entry.apiUrl;
   }
 
   function newSubscriptionId() {
@@ -1642,6 +2071,406 @@ document.addEventListener('DOMContentLoaded', () => {
       .map(input => input.value);
   }
 
+  function subscriptionCredentialInput(id, field) {
+    return [...elements.subscriptionsList.querySelectorAll(`.subscription-credential-${field}`)]
+      .find(input => input.dataset.subscriptionId === id) || null;
+  }
+
+  // Keeps what was typed in the subscription cards before they are rebuilt, so adding a topic or
+  // removing another subscription doesn't reset a server URL or credentials that weren't saved yet.
+  // Does nothing while the settings (and with them the cards) aren't rendered.
+  function captureSubscriptionInputs() {
+    const cards = [...elements.subscriptionsList.querySelectorAll('.subscription-card')];
+    if (cards.length === 0) return;
+
+    const credentials = {};
+    cards.forEach(card => {
+      const id = card.dataset.subscriptionId;
+      const subscription = findSubscription(id);
+      if (!subscription) return;
+      const serverInput = card.querySelector('.subscription-url-input');
+      if (serverInput) subscription.apiUrl = serverInput.value;
+
+      const own = {
+        accessToken: subscriptionCredentialInput(id, 'token')?.value || '',
+        username: subscriptionCredentialInput(id, 'username')?.value || '',
+        password: subscriptionCredentialInput(id, 'password')?.value || ''
+      };
+      if (own.accessToken || own.username || own.password) {
+        credentials[id] = own;
+      }
+    });
+    config.subscriptionCredentials = credentials;
+  }
+
+  // ==================
+  // Send servers
+  // ==================
+
+  function newSendServerId() {
+    return `send_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function createSendServer(apiUrl = '', topics = []) {
+    return { id: newSendServerId(), apiUrl, topics: [...topics] };
+  }
+
+  function findSendServer(id) {
+    return config.sendServers.find(server => server.id === id) || null;
+  }
+
+  function sendServerUrlInput(id) {
+    return [...elements.sendServersList.querySelectorAll('.send-server-url-input')]
+      .find(input => input.dataset.sendServerId === id) || null;
+  }
+
+  function sendServerTopicInput(id) {
+    return [...elements.sendServersList.querySelectorAll('.send-server-topic-input')]
+      .find(input => input.dataset.sendServerId === id) || null;
+  }
+
+  function sendServerCredentialInput(id, field) {
+    return [...elements.sendServersList.querySelectorAll(`.send-server-credential-${field}`)]
+      .find(input => input.dataset.sendServerId === id) || null;
+  }
+
+  // All sending topics, without duplicates. A topic on several servers is sent to the first one.
+  function allSendTopics() {
+    const topics = [];
+    config.sendServers.forEach(server => {
+      server.topics.forEach(topic => {
+        if (!topics.includes(topic)) {
+          topics.push(topic);
+        }
+      });
+    });
+    return topics;
+  }
+
+  // The send server a topic belongs to; null when no server has both a URL and the topic
+  function sendServerForTopic(topic) {
+    return config.sendServers.find(server =>
+      NtfyAPI.normalizeServerUrl(server.apiUrl) && server.topics.includes(topic)) || null;
+  }
+
+  // The ntfy request settings of one send server
+  function sendServerConfig(server) {
+    const credentials = config.sendServerCredentials[server.id] || {};
+    return {
+      apiUrl: NtfyAPI.normalizeServerUrl(server.apiUrl),
+      accessToken: credentials.accessToken || '',
+      username: credentials.username || '',
+      password: credentials.password || ''
+    };
+  }
+
+  // Keeps what was typed in the send server cards before they are rebuilt, so adding a topic or
+  // removing another server doesn't reset a URL or credentials that weren't saved yet.
+  function captureSendServerInputs() {
+    const cards = [...elements.sendServersList.querySelectorAll('.send-server-card')];
+    if (cards.length === 0) return;
+
+    const credentials = {};
+    cards.forEach(card => {
+      const id = card.dataset.sendServerId;
+      const server = findSendServer(id);
+      if (!server) return;
+      const serverInput = card.querySelector('.send-server-url-input');
+      if (serverInput) server.apiUrl = serverInput.value;
+
+      const own = {
+        accessToken: sendServerCredentialInput(id, 'token')?.value || '',
+        username: sendServerCredentialInput(id, 'username')?.value || '',
+        password: sendServerCredentialInput(id, 'password')?.value || ''
+      };
+      if (own.accessToken || own.username || own.password) {
+        credentials[id] = own;
+      }
+    });
+    config.sendServerCredentials = credentials;
+  }
+
+  // One card per send server: its own server, topics and credentials
+  function renderSendServers() {
+    captureSendServerInputs();
+    elements.sendServersList.replaceChildren(
+      ...config.sendServers.map((server, index) => createSendServerCard(server, index))
+    );
+    updateMissingSettings();
+  }
+
+  function createSendServerCard(server, index) {
+    const card = document.createElement('div');
+    card.className = 'subscription-card send-server-card';
+    card.dataset.sendServerId = server.id;
+
+    const header = document.createElement('div');
+    header.className = 'subscription-header';
+
+    const title = document.createElement('span');
+    title.className = 'subscription-title';
+    title.textContent = `发送服务器 ${index + 1}`;
+    header.appendChild(title);
+
+    if (config.sendServers.length > 1) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'subscription-remove-btn';
+      removeBtn.title = '删除此发送服务器';
+      removeBtn.setAttribute('aria-label', '删除此发送服务器');
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => removeSendServer(server.id));
+      header.appendChild(removeBtn);
+    }
+    card.appendChild(header);
+
+    // Server
+    const serverGroup = document.createElement('div');
+    serverGroup.className = 'form-group';
+
+    const serverLabel = document.createElement('label');
+    serverLabel.className = 'form-label';
+    serverLabel.textContent = '服务器地址';
+
+    const serverInput = document.createElement('input');
+    serverInput.type = 'text';
+    serverInput.className = 'form-input send-server-url-input';
+    serverInput.placeholder = 'https://ntfy.sh';
+    serverInput.value = server.apiUrl;
+    serverInput.dataset.sendServerId = server.id;
+    serverInput.setAttribute('aria-label', `发送服务器 ${index + 1} 的地址`);
+    serverInput.addEventListener('input', () => {
+      updateMissingSettings();
+      updateInsecureHint();
+      debouncedSave();
+    });
+    serverInput.addEventListener('change', debouncedSave.flush);
+
+    const accessBtn = document.createElement('button');
+    accessBtn.type = 'button';
+    accessBtn.className = 'chip send-server-access-btn';
+    accessBtn.style.display = 'none';
+    accessBtn.textContent = '🔓 允许访问此服务器';
+    accessBtn.addEventListener('click', () => {
+      const current = findSendServer(server.id);
+      requestServerAccess(NtfyAPI.serverOriginPattern(current ? current.apiUrl : ''));
+    });
+
+    const accessHint = document.createElement('p');
+    accessHint.className = 'form-hint send-server-access-hint';
+    accessHint.style.display = 'none';
+    accessHint.textContent = '你的发送服务器阻止了扩展的请求。允许访问后，扩展才能使用该服务器发送消息。';
+
+    serverGroup.append(serverLabel, serverInput, accessBtn, accessHint);
+
+    // Topics
+    const topicsGroup = document.createElement('div');
+    topicsGroup.className = 'form-group';
+
+    const topicsLabel = document.createElement('label');
+    topicsLabel.className = 'form-label';
+    topicsLabel.textContent = '发送主题';
+
+    const topicsContainer = document.createElement('div');
+    topicsContainer.className = 'topics-container send-server-topics-container';
+    topicsContainer.dataset.sendServerId = server.id;
+
+    server.topics.forEach((topic, topicIndex) => {
+      topicsContainer.appendChild(
+        createTopicBadge(topic, topicIndex, 'sendTopic', server.id)
+      );
+    });
+
+    const topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.className = 'topic-input-field send-server-topic-input';
+    topicInput.dataset.sendServerId = server.id;
+    topicInput.placeholder = server.topics.length ? '' : '输入主题名，例如 alerts';
+    topicInput.setAttribute('aria-label', `添加发送服务器 ${index + 1} 的主题`);
+
+    const topicHint = document.createElement('span');
+    topicHint.className = 'topic-input-hint';
+    topicHint.textContent = '按回车添加主题';
+
+    topicInput.addEventListener('keydown', (e) => handleSendServerTopicKeydown(e, server.id));
+    topicInput.addEventListener('blur', () => addSendServerTopicFromInput(server.id));
+    topicInput.addEventListener('input', () => {
+      topicHint.classList.toggle('visible', topicInput.value.length > 0);
+    });
+    topicsContainer.addEventListener('click', (e) => handleSendServerTopicRemove(e, server.id));
+    topicsContainer.append(topicInput, topicHint);
+
+    const topicsHint = document.createElement('p');
+    topicsHint.className = 'form-hint';
+    topicsHint.textContent = '用于发送的主题。拖动可调整顺序。';
+
+    topicsGroup.append(topicsLabel, topicsContainer, topicsHint);
+
+    // Credentials for this server
+    const own = config.sendServerCredentials[server.id] || {};
+    const credentialsDetails = document.createElement('details');
+    credentialsDetails.className = 'subscription-credentials send-server-credentials';
+    credentialsDetails.open = true;
+
+    const credentialsSummary = document.createElement('summary');
+    credentialsSummary.textContent = '此服务器的访问凭据（可选）';
+    credentialsDetails.appendChild(credentialsSummary);
+
+    const credentialsHint = document.createElement('p');
+    credentialsHint.className = 'form-hint';
+    credentialsHint.textContent = '仅用于这个发送服务器；不同服务器互不影响。';
+
+    const tokenInput = document.createElement('input');
+    tokenInput.type = 'password';
+    tokenInput.className = 'form-input send-server-credential-input send-server-credential-token';
+    tokenInput.placeholder = '访问令牌，例如 tk_...';
+    tokenInput.value = own.accessToken || '';
+    tokenInput.dataset.sendServerId = server.id;
+    tokenInput.setAttribute('aria-label', `发送服务器 ${index + 1} 的访问令牌`);
+
+    const credentialsRow = document.createElement('div');
+    credentialsRow.className = 'credentials-row';
+
+    const usernameInput = document.createElement('input');
+    usernameInput.type = 'text';
+    usernameInput.className = 'form-input send-server-credential-input send-server-credential-username';
+    usernameInput.placeholder = '用户名';
+    usernameInput.autocomplete = 'off';
+    usernameInput.value = own.username || '';
+    usernameInput.dataset.sendServerId = server.id;
+    usernameInput.setAttribute('aria-label', `发送服务器 ${index + 1} 的用户名`);
+
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'password';
+    passwordInput.className = 'form-input send-server-credential-input send-server-credential-password';
+    passwordInput.placeholder = '密码';
+    passwordInput.autocomplete = 'off';
+    passwordInput.value = own.password || '';
+    passwordInput.dataset.sendServerId = server.id;
+    passwordInput.setAttribute('aria-label', `发送服务器 ${index + 1} 的密码`);
+
+    credentialsRow.append(usernameInput, passwordInput);
+    credentialsDetails.append(credentialsHint, tokenInput, credentialsRow);
+
+    [tokenInput, usernameInput, passwordInput].forEach(input => {
+      input.addEventListener('input', () => {
+        updateInsecureHint();
+        debouncedSave();
+      });
+      input.addEventListener('change', debouncedSave.flush);
+    });
+
+    card.append(serverGroup, topicsGroup, credentialsDetails);
+    return card;
+  }
+
+  function addSendServer() {
+    addAllSendServerTopicsFromInputs();
+    const server = createSendServer();
+    config.sendServers.push(server);
+    renderSendServers();
+    saveConfig();
+    updateServerAccessUI();
+    const input = sendServerUrlInput(server.id);
+    if (input) input.focus();
+  }
+
+  function removeSendServer(id) {
+    if (config.sendServers.length <= 1) return;
+    config.sendServers = config.sendServers.filter(server => server.id !== id);
+    delete config.sendServerCredentials[id];
+    renderSendServers();
+    saveConfig();
+    updateServerAccessUI();
+  }
+
+  // Adds the topic typed in a send server card. Returns false for an invalid topic name.
+  function addSendServerTopicFromInput(id) {
+    const server = findSendServer(id);
+    const input = sendServerTopicInput(id);
+    if (!server || !input) return true;
+    const value = input.value.trim();
+    if (!value) return true;
+
+    if (!NtfyAPI.TOPIC_PATTERN.test(value)) {
+      showSettingsStatus('主题名只能包含字母、数字、- 和 _（最多 64 个字符）', 'error');
+      return false;
+    }
+
+    if (!server.topics.includes(value)) {
+      server.topics.push(value);
+      renderSendServers();
+      saveConfig();
+      updateServerAccessUI();
+      const newInput = sendServerTopicInput(id);
+      if (newInput) newInput.focus();
+    } else {
+      input.value = '';
+    }
+    return true;
+  }
+
+  function handleSendServerTopicKeydown(e, id) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addSendServerTopicFromInput(id);
+    } else if (e.key === 'Backspace' && !e.target.value) {
+      const server = findSendServer(id);
+      if (server && server.topics.length > 0) {
+        server.topics.pop();
+        renderSendServers();
+        saveConfig();
+        updateServerAccessUI();
+      }
+    }
+  }
+
+  function handleSendServerTopicRemove(e, id) {
+    if (e.target.classList.contains('topic-remove')) {
+      const server = findSendServer(id);
+      if (!server) return;
+      const index = parseInt(e.target.dataset.index, 10);
+      server.topics.splice(index, 1);
+      renderSendServers();
+      saveConfig();
+      updateServerAccessUI();
+    }
+    if (e.target.classList.contains('send-server-topics-container')) {
+      const input = e.target.querySelector('.send-server-topic-input');
+      if (input) input.focus();
+    }
+  }
+
+  // Adds every topic typed without Enter in the send server cards. Returns false if one is invalid.
+  function addAllSendServerTopicsFromInputs() {
+    const pending = [];
+    for (const card of elements.sendServersList.querySelectorAll('.send-server-card')) {
+      const server = findSendServer(card.dataset.sendServerId);
+      const input = card.querySelector('.send-server-topic-input');
+      if (!server || !input) continue;
+      const value = input.value.trim();
+      if (!value) continue;
+      if (!NtfyAPI.TOPIC_PATTERN.test(value)) {
+        showSettingsStatus('主题名只能包含字母、数字、- 和 _（最多 64 个字符）', 'error');
+        input.focus();
+        return false;
+      }
+      if (!server.topics.includes(value)) {
+        pending.push({ server, value, input });
+      } else {
+        input.value = '';
+      }
+    }
+    if (pending.length > 0) {
+      pending.forEach(({ server, value }) => server.topics.push(value));
+      pending.forEach(({ input }) => { input.value = ''; });
+      renderSendServers();
+      saveConfig();
+      updateServerAccessUI();
+    }
+    return true;
+  }
+
   function createTopicBadge(topic, index, type, subscriptionId = null) {
     const badge = document.createElement('div');
     badge.className = 'topic-badge';
@@ -1657,78 +2486,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return badge;
   }
 
-  function renderTopics() {
-    // Clear current badges but keep input
-    const badges = elements.topicsContainer.querySelectorAll('.topic-badge');
-    badges.forEach(b => b.remove());
-
-    // Insert badges before input
-    config.topics.forEach((topic, index) => {
-      elements.topicsContainer.insertBefore(
-        createTopicBadge(topic, index, 'topic'),
-        elements.newTopicInput
-      );
-    });
-    elements.newTopicInput.placeholder = config.topics.length ? '' : '输入主题名，例如 alerts';
-    updateMissingSettings();
-  }
-
-  // Adds the typed topic, if any. Also on leaving the field, so a topic typed without Enter isn't lost.
-  // Returns false if the typed name isn't a valid ntfy topic (it stays in the field to be corrected).
-  function addTopicFromInput() {
-    const value = elements.newTopicInput.value.trim();
-    if (!value) return true;
-
-    if (!NtfyAPI.TOPIC_PATTERN.test(value)) {
-      showSettingsStatus('主题名只能包含字母、数字、- 和 _（最多 64 个字符）', 'error');
-      return false;
-    }
-
-    // Add topic if not exists
-    if (!config.topics.includes(value)) {
-      config.topics.push(value);
-      renderTopics();
-      saveConfig();
-    }
-    elements.newTopicInput.value = '';
-    updateTopicInputHint(); // Hide hint after clearing
-    return true;
-  }
-
-  function handleTopicKeydown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addTopicFromInput();
-    } else if (e.key === 'Backspace' && !elements.newTopicInput.value) {
-      // Remove last topic if input is empty
-      if (config.topics.length > 0) {
-        config.topics.pop();
-        renderTopics();
-        saveConfig();
-      }
-    }
-  }
-
-  function updateTopicInputHint() {
-    elements.topicInputHint.classList.toggle('visible', elements.newTopicInput.value.length > 0);
-  }
-
-  function handleTopicRemove(e) {
-    if (e.target.classList.contains('topic-remove')) {
-      const index = parseInt(e.target.dataset.index, 10);
-      config.topics.splice(index, 1);
-      renderTopics();
-      saveConfig();
-    }
-
-    // Focus input if clicking on container
-    if (e.target === elements.topicsContainer) {
-      elements.newTopicInput.focus();
-    }
-  }
-
   // One card per subscription: its own server and topic badges, with a remove button
   function renderSubscriptions() {
+    // Keep unsaved input of the cards that are about to be replaced
+    captureSubscriptionInputs();
     elements.subscriptionsList.replaceChildren(
       ...config.subscriptions.map((subscription, index) => createSubscriptionCard(subscription, index))
     );
@@ -1770,7 +2531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverInput = document.createElement('input');
     serverInput.type = 'text';
     serverInput.className = 'form-input subscription-url-input';
-    serverInput.placeholder = '留空则使用发送服务器';
+    serverInput.placeholder = '留空则使用第一个发送服务器';
     serverInput.value = subscription.apiUrl;
     serverInput.dataset.subscriptionId = subscription.id;
     serverInput.setAttribute('aria-label', `订阅 ${index + 1} 的服务器地址`);
@@ -1786,7 +2547,10 @@ document.addEventListener('DOMContentLoaded', () => {
     accessBtn.className = 'chip subscription-access-btn';
     accessBtn.style.display = 'none';
     accessBtn.textContent = '🔓 允许访问此服务器';
-    accessBtn.addEventListener('click', requestServerAccess);
+    accessBtn.addEventListener('click', () => {
+      const current = findSubscription(subscription.id);
+      requestServerAccess(NtfyAPI.serverOriginPattern(current ? resolvedSubscription(current).apiUrl : ''));
+    });
 
     const accessHint = document.createElement('p');
     accessHint.className = 'form-hint subscription-access-hint';
@@ -1834,10 +2598,65 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const topicsHint = document.createElement('p');
     topicsHint.className = 'form-hint';
-    topicsHint.textContent = '接收这些主题的消息；留空则使用发送主题。拖动可调整顺序。';
+    topicsHint.textContent = '接收这些主题的消息；留空则使用同一服务器上的发送主题。拖动可调整顺序。';
 
     topicsGroup.append(topicsLabel, topicsContainer, topicsHint);
-    card.append(serverGroup, topicsGroup);
+
+    // Credentials for this subscription's own server
+    const own = config.subscriptionCredentials[subscription.id] || {};
+    const credentialsDetails = document.createElement('details');
+    credentialsDetails.className = 'subscription-credentials';
+    credentialsDetails.open = true;
+
+    const credentialsSummary = document.createElement('summary');
+    credentialsSummary.textContent = '此订阅的访问凭据（可选）';
+    credentialsDetails.appendChild(credentialsSummary);
+
+    const credentialsHint = document.createElement('p');
+    credentialsHint.className = 'form-hint';
+    credentialsHint.textContent = '仅用于这个订阅的服务器；与某个发送服务器相同时可以留空。';
+
+    const tokenInput = document.createElement('input');
+    tokenInput.type = 'password';
+    tokenInput.className = 'form-input subscription-credential-input subscription-credential-token';
+    tokenInput.placeholder = '访问令牌，例如 tk_...';
+    tokenInput.value = own.accessToken || '';
+    tokenInput.dataset.subscriptionId = subscription.id;
+    tokenInput.setAttribute('aria-label', `订阅 ${index + 1} 的访问令牌`);
+
+    const credentialsRow = document.createElement('div');
+    credentialsRow.className = 'credentials-row';
+
+    const usernameInput = document.createElement('input');
+    usernameInput.type = 'text';
+    usernameInput.className = 'form-input subscription-credential-input subscription-credential-username';
+    usernameInput.placeholder = '用户名';
+    usernameInput.autocomplete = 'off';
+    usernameInput.value = own.username || '';
+    usernameInput.dataset.subscriptionId = subscription.id;
+    usernameInput.setAttribute('aria-label', `订阅 ${index + 1} 的用户名`);
+
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'password';
+    passwordInput.className = 'form-input subscription-credential-input subscription-credential-password';
+    passwordInput.placeholder = '密码';
+    passwordInput.autocomplete = 'off';
+    passwordInput.value = own.password || '';
+    passwordInput.dataset.subscriptionId = subscription.id;
+    passwordInput.setAttribute('aria-label', `订阅 ${index + 1} 的密码`);
+
+    credentialsRow.append(usernameInput, passwordInput);
+    credentialsDetails.append(credentialsHint, tokenInput, credentialsRow);
+
+    [tokenInput, usernameInput, passwordInput].forEach(input => {
+      input.addEventListener('input', () => {
+        updateInsecureHint();
+        debouncedSave();
+      });
+      input.addEventListener('change', debouncedSave.flush);
+    });
+
+    card.append(serverGroup, topicsGroup, credentialsDetails);
     return card;
   }
 
@@ -1957,22 +2776,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==================
 
   function openNtfyUrl() {
-    const topic = receiveFilter;
-    const sendTopics = config.sendEnabled ? config.topics : [];
+    const entry = currentTopicEntry();
+    const topic = entry && entry.kind !== 'all' ? entry.topic : null;
     const subscriptions = config.receiveEnabled ? effectiveSubscriptions() : [];
 
-    // The server the selected topic belongs to: the sending server for a sending topic,
-    // otherwise the first subscription that receives it
+    // The server the selected topic belongs to: the subscription's own server, or the topic's
+    // sending server; All topics uses the first subscription
     let serverUrl = '';
-    if (topic !== 'all' && sendTopics.includes(topic)) {
-      serverUrl = config.apiUrl;
-    } else if (topic !== 'all') {
-      const subscription = subscriptions.find(sub => sub.topics.includes(topic));
-      if (subscription) {
-        serverUrl = subscription.apiUrl;
+    if (entry && entry.kind === 'subscription') {
+      serverUrl = entry.apiUrl;
+    } else if (entry && entry.kind === 'send') {
+      const sendServer = config.sendEnabled ? sendServerForTopic(entry.topic) : null;
+      if (sendServer) {
+        serverUrl = NtfyAPI.normalizeServerUrl(sendServer.apiUrl);
       }
     }
-    if (!serverUrl && topic === 'all' && subscriptions.length > 0) {
+    if (!serverUrl && entry && entry.kind === 'all' && subscriptions.length > 0) {
       serverUrl = subscriptions[0].apiUrl;
     }
     if (!serverUrl) {
@@ -1991,8 +2810,8 @@ document.addEventListener('DOMContentLoaded', () => {
     url.username = '';
     url.password = '';
     // Only append topic if it is a valid topic (present in one of the configured topic lists)
-    if (topic && topic !== 'all'
-      && (config.topics.includes(topic) || subscriptions.some(sub => sub.topics.includes(topic)))) {
+    if (topic
+      && (allSendTopics().includes(topic) || subscriptions.some(sub => sub.topics.includes(topic)))) {
       url.pathname = `${url.pathname.replace(/\/$/, '')}/${encodeURIComponent(topic)}`;
     }
 
@@ -2044,7 +2863,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function sendComposedMessage() {
-    const topic = receiveFilter;
+    const entry = currentTopicEntry();
+    const topic = entry && entry.kind !== 'all' ? entry.topic : '';
     const message = elements.messageInput.value.trim();
     const title = elements.titleInput.value.trim();
     const tagsString = tags.join(','); // Use tags array
@@ -2068,13 +2888,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (!config.apiUrl) {
-      showStatus('请在设置中配置 ntfy 服务器地址', 'warning');
-      return;
-    }
-
-    if (!config.topics.includes(topic)) {
-      showStatus('请选择主题', 'warning');
+    const sendServer = sendServerForTopic(topic);
+    if (!sendServer) {
+      if (!config.sendServers.some(server => NtfyAPI.normalizeServerUrl(server.apiUrl))) {
+        showStatus('请在设置中配置 ntfy 服务器地址', 'warning');
+      } else {
+        showStatus('请选择主题', 'warning');
+      }
       return;
     }
 
@@ -2082,12 +2902,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAttachments();
 
     try {
-      const apiConfig = {
-        apiUrl: config.apiUrl,
-        accessToken: config.accessToken,
-        username: config.username,
-        password: config.password
-      };
+      const apiConfig = sendServerConfig(sendServer);
 
       if (filesToSend.length > 0) {
         const sendAsZip = filesToSend.length > 1 && elements.zipCheckbox.checked;
@@ -2335,16 +3150,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // Recent Notifications
   // ==================
 
-  // Lists the received messages of the selected topic, or of all topics
-  async function loadNotifications() {
-    const topics = viewTopics();
-    if (receiveFilter !== 'all' && !topics.includes(receiveFilter)) {
-      receiveFilter = 'all';
+  // Lists the received messages of the selected topic entry, or of all topics.
+  // keepSidebar leaves the sidebar as it is, for a click that only changes the selected entry.
+  async function loadNotifications(options = {}) {
+    const entries = topicEntries();
+    let entry = entries.find(candidate => candidate.key === receiveFilter) || null;
+    if (!entry && receiveFilter !== 'all') {
+      // Older versions saved only the topic name; a removed entry falls back the same way
+      entry = entries.find(candidate => candidate.kind !== 'all' && candidate.topic === receiveFilter) || null;
+      if (entry) {
+        receiveFilter = entry.key;
+        saveToStorageLocal({ receiveTopicFilter: receiveFilter }).catch(() => {});
+      } else {
+        receiveFilter = 'all';
+      }
     }
     // Without receiving, All topics isn't offered: there is nothing to list, and nothing to send to
-    if (!config.receiveEnabled && receiveFilter === 'all'
-      && config.sendEnabled && config.topics.length > 0) {
-      receiveFilter = config.topics[0];
+    if (!config.receiveEnabled && receiveFilter === 'all' && config.sendEnabled) {
+      const firstSendEntry = entries.find(candidate => sendServerForTopic(candidate.topic));
+      if (firstSendEntry) {
+        receiveFilter = firstSendEntry.key;
+      }
     }
     updateComposer();
     updateNotifyToggle();
@@ -2358,7 +3184,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!config.receiveEnabled) {
       currentNotifications = [];
-      renderTopicSidebar([]);
+      if (!options.keepSidebar) {
+        renderTopicSidebar([]);
+      }
       return;
     }
 
@@ -2372,11 +3200,14 @@ document.addEventListener('DOMContentLoaded', () => {
       thumbnailCache = localData[THUMBNAIL_CACHE_KEY] || {};
       pruneThumbnails(allNotifications);
 
-      renderTopicSidebar(allNotifications);
+      if (!options.keepSidebar) {
+        renderTopicSidebar(allNotifications);
+      }
 
-      const notifications = receiveFilter === 'all'
+      const selectedEntry = currentTopicEntry();
+      const notifications = selectedEntry && selectedEntry.kind === 'all'
         ? allNotifications
-        : allNotifications.filter(notification => notification.topic === receiveFilter);
+        : allNotifications.filter(notification => matchesTopicEntry(notification, selectedEntry));
 
       // Save currently visible notifications for bulk actions
       currentNotifications = notifications;
@@ -2387,7 +3218,16 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.notificationsList.innerHTML = '';
 
       if (notifications.length === 0) {
-        elements.notificationsList.innerHTML = '<div class="notifications-empty">暂无通知</div>';
+        const denied = deniedTopicsForSubscriptions();
+        const empty = document.createElement('div');
+        empty.className = 'notifications-empty';
+        if (denied.length > 0) {
+          empty.textContent = `收不到消息：服务器拒绝读取主题 ${denied.join('、')}（403）。`
+            + '请在设置中展开对应订阅的「访问凭据」，填写该服务器的访问令牌或用户名密码。';
+        } else {
+          empty.textContent = '暂无通知';
+        }
+        elements.notificationsList.replaceChildren(empty);
         return;
       }
 
@@ -2526,10 +3366,35 @@ document.addEventListener('DOMContentLoaded', () => {
     saveToStorageLocal({ receiveHintDismissed: true }).catch(() => {});
   }
 
+  // Topics the server refused to the configured credentials (401/403), among the subscriptions
+  function deniedTopicsForSubscriptions() {
+    const denied = [];
+    effectiveSubscriptions().forEach(subscription => {
+      (readAccessDenied[subscription.apiUrl] || []).forEach(topic => {
+        if (subscription.topics.includes(topic) && !denied.includes(topic)) {
+          denied.push(topic);
+        }
+      });
+    });
+    return denied;
+  }
+
+  // Says in the settings why a server sends nothing, instead of only an empty message list
+  function updateAccessDeniedHint() {
+    const denied = config.receiveEnabled ? deniedTopicsForSubscriptions() : [];
+    elements.accessDeniedHint.hidden = denied.length === 0;
+    if (denied.length > 0) {
+      elements.accessDeniedHint.textContent =
+        `服务器拒绝读取这些主题（403）：${denied.join('、')}。`
+        + '请展开对应订阅的「访问凭据」，填写该服务器的访问令牌或用户名密码。';
+    }
+  }
+
   // First start: nothing to list until a server and at least one topic are set
   function renderSetupHint() {
     elements.topicSidebar.replaceChildren();
     elements.topicSidebar.style.display = 'none';
+    elements.topicColumn.style.display = 'none';
     elements.notificationsSection.classList.add('setup');
 
     const hint = document.createElement('div');
@@ -2543,7 +3408,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (config.receiveEnabled && effectiveSubscriptions().length === 0) {
       titleText = '未配置订阅';
       textText = '请在“接收与订阅”中添加订阅服务器和主题。';
-    } else if (config.sendEnabled && !config.apiUrl) {
+    } else if (config.sendEnabled
+      && !config.sendServers.some(server => NtfyAPI.normalizeServerUrl(server.apiUrl))) {
       titleText = '未配置服务器';
       textText = '请在设置中输入 ntfy 服务器和主题以开始使用。';
     } else {
@@ -2562,37 +3428,44 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.notificationsList.replaceChildren(hint);
   }
 
-  // Topic list: All topics (when receiving), then each configured topic, with unread counts
+  // Topic list: All topics (when receiving), then each configured topic entry, with unread counts
   function renderTopicSidebar(notifications) {
-    const unreadCount = topic => notifications
-      .filter(notification => topic === 'all' || notification.topic === topic)
-      .filter(notification => !readMessageIds.includes(notification.id))
-      .length;
-
+    const entries = topicEntries();
     const receiveTopics = effectiveReceiveTopics();
-    const entries = config.receiveEnabled
-      ? ['all', ...viewTopics()]
-      : (config.sendEnabled ? config.topics : []);
+    elements.topicColumn.style.display = '';
     elements.topicSidebar.style.display = '';
-    elements.topicSidebar.replaceChildren(...entries.map(topic => {
+    elements.topicSidebar.replaceChildren(...entries.map(entry => {
       const btn = document.createElement('button');
+      btn.type = 'button';
       btn.className = 'topic-filter-btn';
-      btn.classList.toggle('active', topic === receiveFilter);
+      btn.dataset.topicKey = entry.key;
+      btn.classList.toggle('active', entry.key === receiveFilter);
 
       const name = document.createElement('span');
       name.className = 'topic-filter-name';
-      name.textContent = topic === 'all' ? '全部主题' : topic;
+      name.textContent = topicEntryLabel(entry);
+      if (entry.kind !== 'all' && topicRemarks[entry.key]) {
+        name.title = entry.topic; // The real topic, which the remark hides
+      }
       btn.appendChild(name);
 
-      if (config.receiveEnabled && topic !== 'all' && receiveTopics.includes(topic)
-        && (notificationsMuted || mutedTopics.includes(topic))) {
-        // The header switch's crossed-out bell
-        const icon = elements.notifyToggle.querySelector('.notify-icon-off').cloneNode(true);
+      if (entry.kind !== 'all' && receiveTopics.includes(entry.topic)
+        && (notificationsMuted || mutedTopics.includes(entry.topic))) {
+        // A crossed-out bell, inlined so it doesn't depend on the header switch's markup
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         icon.setAttribute('class', 'topic-muted-icon');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z');
+        icon.appendChild(path);
         btn.appendChild(icon);
       }
 
-      const count = unreadCount(topic);
+      const count = notifications
+        .filter(notification => matchesTopicEntry(notification, entry))
+        .filter(notification => !readMessageIds.includes(notification.id))
+        .length;
       if (count > 0) {
         const badge = document.createElement('span');
         badge.className = 'topic-unread-count';
@@ -2600,50 +3473,132 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.appendChild(badge);
       }
 
-      btn.addEventListener('click', () => {
-        receiveFilter = topic;
-        setDeleteAllArmed(false);
-        saveToStorageLocal({ receiveTopicFilter: topic }).catch(() => {});
-        // Another topic's list starts at the top, not at the previous list's scroll position
-        loadNotifications().then(() => { elements.notificationsList.scrollTop = 0; });
+      btn.addEventListener('click', () => selectTopicEntry(entry));
+      btn.addEventListener('dblclick', (e) => {
+        if (entry.kind === 'all') return;
+        e.preventDefault();
+        startTopicRemarkEdit(btn, entry);
       });
       return btn;
     }));
+  }
+
+  // Shows the entry's messages. The sidebar isn't rebuilt, so a double-click on an entry keeps
+  // working and opens its remark field.
+  function selectTopicEntry(entry) {
+    if (receiveFilter !== entry.key) {
+      receiveFilter = entry.key;
+      saveToStorageLocal({ receiveTopicFilter: receiveFilter }).catch(() => {});
+    }
+    setDeleteAllArmed(false);
+    elements.topicSidebar.querySelectorAll('.topic-filter-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.topicKey === entry.key);
+    });
+    // Another topic's list starts at the top, not at the previous list's scroll position
+    loadNotifications({ keepSidebar: true }).then(() => { elements.notificationsList.scrollTop = 0; });
+  }
+
+  // Double-click a topic: its name becomes a field for a remark shown instead of the topic name
+  function startTopicRemarkEdit(btn, entry) {
+    const name = btn.querySelector('.topic-filter-name');
+    if (!name || btn.querySelector('.topic-remark-input')) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'topic-remark-input';
+    input.value = topicRemarks[entry.key] || '';
+    input.placeholder = entry.topic;
+    input.setAttribute('aria-label', `为 ${entry.topic} 设置备注`);
+    // Clicks in the field must not select the topic again or leave the field
+    ['pointerdown', 'click', 'dblclick'].forEach(type => {
+      input.addEventListener(type, e => e.stopPropagation());
+    });
+
+    let finished = false;
+    const finish = save => {
+      if (finished) return;
+      finished = true;
+      if (save) {
+        const remark = input.value.trim();
+        if (remark) {
+          topicRemarks[entry.key] = remark;
+        } else {
+          delete topicRemarks[entry.key];
+        }
+        saveToStorageLocal({ topicRemarks }).catch(error => {
+          console.error('Error saving the topic remark:', error);
+        });
+      }
+      const span = document.createElement('span');
+      span.className = 'topic-filter-name';
+      span.textContent = topicEntryLabel(entry);
+      if (topicRemarks[entry.key]) {
+        span.title = entry.topic;
+      }
+      input.replaceWith(span);
+      if (entry.key === receiveFilter) {
+        elements.notificationsTitle.textContent = topicEntryLabel(entry);
+        updateNotifyToggle();
+      }
+    };
+
+    input.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+
+    name.replaceWith(input);
+    input.focus();
+    input.select();
   }
 
   // Switch in the topic header for notifications: of all topics on All topics, otherwise of the
   // selected topic. Off, messages show no desktop notification and are marked as read (background).
   // Only while receiving, as there are none otherwise.
   function updateNotifyToggle() {
-    const receiveTopics = effectiveReceiveTopics();
+    const entry = currentTopicEntry();
     const configured = Boolean(config.receiveEnabled && effectiveSubscriptions().length > 0);
-    const receivable = receiveFilter === 'all' || receiveTopics.includes(receiveFilter);
+    const receivable = Boolean(entry && (entry.kind === 'all' || entry.kind === 'subscription'));
     elements.notifyToggle.hidden = !configured || !receivable;
     const checkbox = elements.notifyCheckbox;
+    if (!entry) {
+      checkbox.checked = true;
+      checkbox.disabled = true;
+      elements.notifyToggle.title = '';
+      return;
+    }
     let title;
-    if (receiveFilter === 'all') {
+    if (entry.kind === 'all') {
       checkbox.checked = !notificationsMuted;
       checkbox.disabled = false;
       title = notificationsMuted ? '所有主题的通知已关闭' : '所有主题的通知';
     } else {
-      checkbox.checked = !notificationsMuted && !mutedTopics.includes(receiveFilter);
+      checkbox.checked = !notificationsMuted && !mutedTopics.includes(entry.topic);
       checkbox.disabled = notificationsMuted;
       title = notificationsMuted
         ? '所有主题的通知已关闭。请在“全部主题”中开启。'
-        : `${receiveFilter} 的通知`;
+        : `${topicEntryLabel(entry)} 的通知`;
     }
     elements.notifyToggle.title = title;
   }
 
   // The storage change refreshes the topic list and the switch
   async function handleNotifyToggle() {
+    const entry = currentTopicEntry();
     const on = elements.notifyCheckbox.checked;
-    if (receiveFilter === 'all') {
+    if (!entry || entry.kind === 'all') {
       notificationsMuted = !on;
     } else {
       mutedTopics = on
-        ? mutedTopics.filter(topic => topic !== receiveFilter)
-        : [...mutedTopics, receiveFilter];
+        ? mutedTopics.filter(topic => topic !== entry.topic)
+        : [...mutedTopics, entry.topic];
     }
     try {
       await saveToStorageLocal({ notificationsMuted, mutedTopics });
@@ -2806,13 +3761,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadLocalState() {
     try {
-      const result = await getFromStorageLocal(['readMessageIds', 'deletedMessageIds', 'receiveTopicFilter', 'receiveHintDismissed', 'notificationsMuted', 'mutedTopics']);
+      const result = await getFromStorageLocal(['readMessageIds', 'deletedMessageIds', 'receiveTopicFilter', 'receiveHintDismissed', 'notificationsMuted', 'mutedTopics', 'readAccessDenied', 'topicRemarks']);
       readMessageIds = result.readMessageIds || [];
       deletedMessageIds = result.deletedMessageIds || [];
       receiveFilter = result.receiveTopicFilter || 'all';
       receiveHintDismissed = result.receiveHintDismissed === true;
       notificationsMuted = result.notificationsMuted === true;
       mutedTopics = result.mutedTopics || [];
+      readAccessDenied = result.readAccessDenied || {};
+      topicRemarks = result.topicRemarks && typeof result.topicRemarks === 'object'
+        ? result.topicRemarks
+        : {};
     } catch (error) {
       console.error('Error loading local state:', error);
     }
@@ -3012,7 +3971,8 @@ document.addEventListener('DOMContentLoaded', () => {
     deleteAllArmed = armed;
     clearTimeout(deleteAllTimer);
     elements.deleteAllBtn.classList.toggle('confirming', armed);
-    const scope = receiveFilter === 'all' ? '全部' : `“${receiveFilter}”中的全部`;
+    const entry = currentTopicEntry();
+    const scope = !entry || entry.kind === 'all' ? '全部' : `“${topicEntryLabel(entry)}”中的全部`;
     elements.deleteAllBtn.textContent = armed ? `删除${scope}？` : '🗑 全部删除';
     elements.deleteAllBtn.title = armed ? '再次点击以删除' : '全部删除';
     if (armed) {

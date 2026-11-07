@@ -47,20 +47,58 @@ const NtfyAPI = {
     },
 
     /**
-     * Get configuration from storage. Each subscription's server and topics fall back to the
-     * sending ones while they are not set.
-     * @returns {Promise<{apiUrl: string, accessToken: string, username: string, password: string, topics: string[], sendEnabled: boolean, receiveEnabled: boolean, subscriptions: Array<{id: string, apiUrl: string, topics: string[]}>, receiveApiUrl: string, receiveTopics: string[]}>}
+     * Parse the stored send servers: each has an id, a server and a topic list
+     * @param {*} value
+     * @returns {Array<{id: string, apiUrl: string, topics: string[]}>|null} - null when none are stored
+     */
+    parseSendServers(value) {
+        return this.parseSubscriptions(value);
+    },
+
+    /**
+     * Get configuration from storage. A subscription's server falls back to the first send
+     * server, its topics to the sending topics of its own server.
+     * @returns {Promise<{apiUrl: string, accessToken: string, username: string, password: string, topics: string[], sendServers: Array<{id: string, apiUrl: string, topics: string[], accessToken: string, username: string, password: string}>, sendEnabled: boolean, receiveEnabled: boolean, subscriptions: Array<{id: string, apiUrl: string, topics: string[]}>, receiveApiUrl: string, receiveTopics: string[]}>}
      */
     async getConfig() {
         const accessToken = await this.getAccessToken();
         // Before reading apiUrl: moves credentials out of it
         const { username, password } = await this.getServerCredentials();
+        // Per-server credentials, kept on this device like the shared ones
+        const { subscriptionCredentials = {}, sendServerCredentials } =
+            await chrome.storage.local.get(['subscriptionCredentials', 'sendServerCredentials']);
         return new Promise((resolve) => {
             chrome.storage.sync.get(
-                ['apiUrl', 'topics', 'sendEnabled', 'receiveEnabled', 'subscriptions', 'receiveApiUrl', 'receiveTopics'],
+                ['apiUrl', 'topics', 'sendEnabled', 'receiveEnabled', 'subscriptions', 'receiveApiUrl', 'receiveTopics', 'sendServers'],
                 (items) => {
                     const apiUrl = this.normalizeServerUrl(items.apiUrl);
                     const topics = this.parseTopics(items.topics);
+
+                    // Send servers: older versions had one server and one topic list
+                    let sendServers = this.parseSendServers(items.sendServers);
+                    if (!sendServers) {
+                        sendServers = [{ id: 'default', apiUrl, topics }];
+                    }
+                    if (sendServers.length === 0) {
+                        sendServers = [{ id: 'default', apiUrl: '', topics: [] }];
+                    }
+                    // Before the per-server credentials existed, the shared fields held the first server's
+                    const sendCredentials = sendServerCredentials && typeof sendServerCredentials === 'object'
+                        ? sendServerCredentials
+                        : { [sendServers[0].id]: { accessToken, username, password } };
+                    const resolvedSendServers = sendServers.map(server => {
+                        const own = sendCredentials[server.id] || {};
+                        return {
+                            id: server.id,
+                            apiUrl: this.normalizeServerUrl(server.apiUrl),
+                            topics: server.topics,
+                            accessToken: own.accessToken || '',
+                            username: own.username || '',
+                            password: own.password || ''
+                        };
+                    });
+                    const firstSend = resolvedSendServers[0];
+
                     let subscriptions = this.parseSubscriptions(items.subscriptions);
                     if (!subscriptions) {
                         // Older versions had one subscription server and topic list
@@ -73,20 +111,48 @@ const NtfyAPI = {
                     if (subscriptions.length === 0) {
                         subscriptions = [{ id: 'default', apiUrl: '', topics: [] }];
                     }
-                    const resolved = subscriptions.map(subscription => ({
-                        id: subscription.id,
-                        apiUrl: this.normalizeServerUrl(subscription.apiUrl) || apiUrl,
-                        topics: subscription.topics.length > 0 ? subscription.topics : topics
-                    }));
+                    const sendServerByUrl = new Map();
+                    resolvedSendServers.forEach(server => {
+                        if (server.apiUrl && !sendServerByUrl.has(server.apiUrl)) {
+                            sendServerByUrl.set(server.apiUrl, server);
+                        }
+                    });
+                    const resolved = subscriptions.map(subscription => {
+                        // A subscription without a server uses the first send server; one without
+                        // topics uses the sending topics of its own server.
+                        const subscriptionUrl = this.normalizeServerUrl(subscription.apiUrl) || firstSend.apiUrl;
+                        const sendServer = sendServerByUrl.get(subscriptionUrl);
+                        const own = subscriptionCredentials[subscription.id] || {};
+                        const hasOwn = Boolean(own.accessToken || own.username || own.password);
+                        const useSendCredentials = !hasOwn && Boolean(sendServer);
+                        return {
+                            id: subscription.id,
+                            apiUrl: subscriptionUrl,
+                            topics: subscription.topics.length > 0
+                                ? subscription.topics
+                                : (sendServer ? sendServer.topics : firstSend.topics),
+                            accessToken: hasOwn
+                                ? (own.accessToken || '')
+                                : (useSendCredentials ? sendServer.accessToken : ''),
+                            username: hasOwn
+                                ? (own.username || '')
+                                : (useSendCredentials ? sendServer.username : ''),
+                            password: hasOwn
+                                ? (own.password || '')
+                                : (useSendCredentials ? sendServer.password : '')
+                        };
+                    });
                     resolve({
-                        apiUrl,
-                        accessToken: accessToken,
-                        username,
-                        password,
-                        topics,
+                        // The first send server, for callers that use one
+                        apiUrl: firstSend.apiUrl,
+                        accessToken: firstSend.accessToken,
+                        username: firstSend.username,
+                        password: firstSend.password,
+                        topics: firstSend.topics,
+                        sendServers: resolvedSendServers,
                         // Before the switches existed, a configured server and topics meant sending was on
                         sendEnabled: items.sendEnabled === undefined
-                            ? Boolean(apiUrl && topics.length > 0)
+                            ? resolvedSendServers.some(server => server.apiUrl && server.topics.length > 0)
                             : items.sendEnabled === true,
                         receiveEnabled: items.receiveEnabled === true,
                         subscriptions: resolved,

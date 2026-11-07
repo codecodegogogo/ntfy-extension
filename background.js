@@ -78,7 +78,8 @@ async function clearPreviousSessionDrafts() {
 // Listen for storage changes to update context menu, WebSocket config, and unread badge
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
-        if (changes.topics || changes.apiUrl || changes.accessToken || changes.sendEnabled) {
+        if (changes.topics || changes.apiUrl || changes.sendServers
+            || changes.accessToken || changes.sendEnabled) {
             updateContextMenu();
             scheduleWebSocketInit();
         }
@@ -97,7 +98,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
         }
     }
     if (area === 'local') {
-        if (changes.accessToken || changes.serverUsername || changes.serverPassword) {
+        if (changes.accessToken || changes.serverUsername || changes.serverPassword
+            || changes.subscriptionCredentials || changes.sendServerCredentials) {
             scheduleWebSocketInit();
         }
         if (changes.receivedNotifications || changes.readMessageIds || changes.deletedMessageIds) {
@@ -117,9 +119,29 @@ function receiveGroups(config) {
             return;
         }
         if (!groups.has(subscription.apiUrl)) {
-            groups.set(subscription.apiUrl, { apiUrl: subscription.apiUrl, topics: [] });
+            // The readable-topic check, the WebSocket URL and the catch-up poll all need the
+            // credentials; getConfig resolved each subscription's own, or the shared ones.
+            groups.set(subscription.apiUrl, {
+                ...config,
+                apiUrl: subscription.apiUrl,
+                topics: [],
+                accessToken: subscription.accessToken,
+                username: subscription.username,
+                password: subscription.password
+            });
         }
         const group = groups.get(subscription.apiUrl);
+        // One token per server: if the first subscription to it has none, take the next one's
+        const groupHasCredentials = Boolean(group.accessToken || group.username || group.password);
+        const subscriptionHasCredentials = Boolean(
+            subscription.accessToken || subscription.username || subscription.password);
+        if (!groupHasCredentials && subscriptionHasCredentials) {
+            Object.assign(group, {
+                accessToken: subscription.accessToken,
+                username: subscription.username,
+                password: subscription.password
+            });
+        }
         subscription.topics.forEach(topic => {
             if (!group.topics.includes(topic)) {
                 group.topics.push(topic);
@@ -154,15 +176,36 @@ function updateContextMenu() {
     return contextMenuUpdate;
 }
 
+// All sending topics of servers with a URL, without duplicates. A topic on several servers is
+// sent to the first one.
+function sendTopics(config) {
+    const topics = [];
+    (config.sendServers || []).forEach(server => {
+        if (!NtfyAPI.normalizeServerUrl(server.apiUrl)) return;
+        server.topics.forEach(topic => {
+            if (!topics.includes(topic)) {
+                topics.push(topic);
+            }
+        });
+    });
+    return topics;
+}
+
+// The send server a topic belongs to; null when no server has both a URL and the topic
+function sendServerForTopic(config, topic) {
+    return (config.sendServers || []).find(server =>
+        NtfyAPI.normalizeServerUrl(server.apiUrl) && server.topics.includes(topic)) || null;
+}
+
 // Build or rebuild the context menu based on current topics
 async function buildContextMenu() {
     // Remove all existing menus first
     await chrome.contextMenus.removeAll();
 
     const config = await NtfyAPI.getConfig();
-    const topics = config.topics;
+    const topics = sendTopics(config);
 
-    if (!config.sendEnabled || !config.apiUrl || topics.length === 0) {
+    if (!config.sendEnabled || topics.length === 0) {
         // Sending is off, or not configured: don't create menu
         return;
     }
@@ -343,7 +386,10 @@ function noteImageSiteUse(origin, newlyGranted) {
 // Origins of the sending and subscription servers, which the extension needs for its own requests
 async function serverOriginPatterns() {
     const config = await NtfyAPI.getConfig();
-    return [config.apiUrl, ...config.subscriptions.map(subscription => subscription.apiUrl)]
+    return [
+        ...(config.sendServers || []).map(server => server.apiUrl),
+        ...config.subscriptions.map(subscription => subscription.apiUrl)
+    ]
         .map(apiUrl => NtfyAPI.serverOriginPattern(apiUrl))
         .filter(Boolean);
 }
@@ -405,16 +451,16 @@ async function updateImageSiteAlarm(sites) {
 
 async function handleMenuAction(action, topic, info, tab) {
     const config = await NtfyAPI.getConfig();
-    const topics = config.topics;
+    const sendServer = sendServerForTopic(config, topic);
 
-    if (!config.sendEnabled || !config.apiUrl || topics.length === 0) {
-        console.error('Sending is disabled or ntfy is not configured');
+    if (!config.sendEnabled) {
+        console.error('Sending is disabled');
         showBadge('✗', '#f44336');
         return;
     }
 
-    // The topic must still be configured
-    if (!topic || !topics.includes(topic)) {
+    // The topic must still be configured on a server with a URL
+    if (!topic || !sendServer) {
         console.error('Could not determine topic');
         showBadge('✗', '#f44336');
         return;
@@ -423,13 +469,13 @@ async function handleMenuAction(action, topic, info, tab) {
     try {
         if (action === SEND_SELECTION_ID) {
             // Send selected text
-            await NtfyAPI.sendNotification(config, topic, {
+            await NtfyAPI.sendNotification(sendServer, topic, {
                 message: info.selectionText
             });
             showBadge('✓', '#4CAF50');
         } else if (action === SEND_IMAGE_ID) {
             // Send image
-            await NtfyAPI.sendImageFromUrl(config, topic, info.srcUrl);
+            await NtfyAPI.sendImageFromUrl(sendServer, topic, info.srcUrl);
             showBadge('✓', '#4CAF50');
         } else if (action === SEND_LINK_ID) {
             // Send link URL
@@ -463,14 +509,14 @@ async function handleMenuAction(action, topic, info, tab) {
             }
 
             // The link text is the title
-            await NtfyAPI.sendNotification(config, topic, {
+            await NtfyAPI.sendNotification(sendServer, topic, {
                 message: urlToSend,
                 title: linkText
             });
             showBadge('✓', '#4CAF50');
         } else if (action === SEND_TAB_ID) {
             // Send current page (tab) URL
-            await NtfyAPI.sendNotification(config, topic, {
+            await NtfyAPI.sendNotification(sendServer, topic, {
                 message: tab.url,
                 title: tab.title
             });
@@ -674,6 +720,7 @@ async function getReadableTopics(config) {
     if (skipped.length > 0) {
         console.log(`Not receiving from topics without read access: ${skipped.join(', ')}`);
     }
+    await recordReadAccess(config.apiUrl, skipped);
     if (!access.includes(null)) {
         readableTopicsCache = { key, topics, time: Date.now() };
         if (chrome.storage.session) {
@@ -681,6 +728,26 @@ async function getReadableTopics(config) {
         }
     }
     return topics;
+}
+
+// Topics the server refused to the configured credentials (HTTP 401/403), per server, so the popup
+// can say why nothing arrives instead of only showing an empty list.
+async function recordReadAccess(server, deniedTopics) {
+    await serialized(async () => {
+        const { readAccessDenied = {} } = await chrome.storage.local.get(['readAccessDenied']);
+        const previous = readAccessDenied[server];
+        if (deniedTopics.length === 0) {
+            if (!previous) return;
+            delete readAccessDenied[server];
+        } else {
+            if (previous && previous.length === deniedTopics.length
+                && previous.every(topic => deniedTopics.includes(topic))) {
+                return;
+            }
+            readAccessDenied[server] = deniedTopics;
+        }
+        await chrome.storage.local.set({ readAccessDenied });
+    });
 }
 
 // The alarm reconnects and catches up while receiving. Without receiving there is nothing for it to
@@ -1300,8 +1367,8 @@ function forgetRemovedTopics(config) {
     }));
 
     return serialized(async () => {
-        const { topicSyncState = {}, receivedNotifications = [], mutedTopics = [] } =
-            await chrome.storage.local.get(['topicSyncState', 'receivedNotifications', 'mutedTopics']);
+        const { topicSyncState = {}, receivedNotifications = [], mutedTopics = [], readAccessDenied = {} } =
+            await chrome.storage.local.get(['topicSyncState', 'receivedNotifications', 'mutedTopics', 'readAccessDenied']);
         const update = {};
 
         const stale = Object.keys(topicSyncState).filter(key => {
@@ -1332,6 +1399,17 @@ function forgetRemovedTopics(config) {
         const stillMuted = mutedTopics.filter(topic => topics.has(topic));
         if (stillMuted.length !== mutedTopics.length) {
             update.mutedTopics = stillMuted;
+        }
+        const servers = new Set(groups.map(group => group.apiUrl));
+        let deniedChanged = false;
+        Object.keys(readAccessDenied).forEach(server => {
+            if (!servers.has(server)) {
+                delete readAccessDenied[server];
+                deniedChanged = true;
+            }
+        });
+        if (deniedChanged) {
+            update.readAccessDenied = readAccessDenied;
         }
 
         if (Object.keys(update).length > 0) {

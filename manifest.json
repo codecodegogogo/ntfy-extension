@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "minimum_chrome_version": "116",
-  "name": "发送到 ntfy",
+  "name": "ntfy-extension",
   "version": "3.3.0",
-  "description": "发送和接收 ntfy 通知：可添加多个订阅，支持文件附件、优先级、标签和已接收消息列表",
+  "description": "发送和接收 ntfy 通知：可添加多个发送服务器和订阅，支持文件附件、优先级、标签和已接收消息列表",
   "permissions": [
     "activeTab",
     "storage",

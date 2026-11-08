@@ -1768,6 +1768,43 @@ body.filepicker-page {
     transform: rotate(180deg);
 }
 
+/* Pull button in the heading: fetches every subscribed topic from the server again */
+.icon-btn.pull-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+}
+
+.icon-btn.pull-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.icon-btn.pull-btn:hover:not(:disabled) {
+    background: var(--border-color);
+    color: var(--primary-light);
+}
+
+.icon-btn.pull-btn:active:not(:disabled) {
+    background: var(--border-color);
+}
+
+.icon-btn.pull-btn[hidden] {
+    display: none;
+}
+
+/* The arrow turns while the messages are being fetched */
+.icon-btn.pull-btn.pulling svg {
+    animation: pull-spin 1s linear infinite;
+}
+
+@keyframes pull-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* Hidden topic list: the column goes away entirely, the toggle in the heading brings it back */
 #main-view.sidebar-hidden .topic-column {
     display: none;

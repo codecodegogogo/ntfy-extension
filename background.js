@@ -10,6 +10,10 @@ if (typeof importScripts === 'function') {
 // One socket per subscription server: server URL -> { ws, url, reconnectTimer, keepaliveTimer,
 // reconnectDelay, lastActivity }
 const sockets = new Map();
+// Failed WebSocket attempts (before it opened), and whether the one-time read-access check after
+// repeated failures has been done. Both reset when the socket opens or the subscription changes.
+const wsFailures = new Map();
+const authCheckedServers = new Set();
 const MAX_RECONNECT_DELAY = 60000;
 // Chrome stops an idle extension service worker after 30 s. Since Chrome 116, WebSocket traffic resets
 // that timer, but ntfy only sends a keepalive every 45 s by default, so send a small frame of our own.
@@ -591,32 +595,55 @@ async function refreshWebSocket() {
         return;
     }
 
-    if (await waitForRateLimit()) {
-        return;
-    }
-
     await migrateTopicSyncState(config);
 
     const activeServers = new Set();
     for (const group of groups) {
-        const topics = await getReadableTopics(group);
-        if (await waitForRateLimit()) {
-            return;
+        // A paused server is skipped on its own; the others still connect and receive
+        if (await waitForRateLimit(group.apiUrl)) {
+            if (group.topics.length > 0) {
+                activeServers.add(group.apiUrl);
+            }
+            continue;
+        }
+        const existing = sockets.get(group.apiUrl);
+        const baseTopics = await subscriptionTopics(group);
+        let expectedUrl = null;
+        try {
+            expectedUrl = buildWsUrl({ ...group, topics: baseTopics }).keyUrl;
+        } catch (e) {}
+        // A different server, topic list or token starts the failure count over
+        if (existing && existing.url && expectedUrl && existing.url !== expectedUrl) {
+            wsFailures.delete(group.apiUrl);
+            authCheckedServers.delete(group.apiUrl);
+        }
+
+        // After repeated failures the subscription may contain a topic the credentials can't read,
+        // which makes ntfy refuse the whole socket: ask /auth once, then reconnect without it
+        const checkAccess = (wsFailures.get(group.apiUrl) || 0) >= 2
+            && !authCheckedServers.has(group.apiUrl);
+        if (checkAccess) {
+            authCheckedServers.add(group.apiUrl);
+        }
+        const topics = checkAccess ? await getReadableTopics(group) : baseTopics;
+        if (await waitForRateLimit(group.apiUrl)) {
+            if (topics.length > 0) {
+                activeServers.add(group.apiUrl);
+            }
+            continue;
         }
         if (topics.length === 0) {
             console.log(`No configured topic is readable on ${group.apiUrl}, skipping its WebSocket.`);
             continue;
         }
-        const subscription = { ...group, topics };
+        const subscription = { ...group, topics, since: await wsSinceFor(group, topics) };
         activeServers.add(group.apiUrl);
 
-        const existing = sockets.get(group.apiUrl);
+        try {
+            expectedUrl = buildWsUrl(subscription).keyUrl;
+        } catch (e) {}
         if (existing && existing.ws
             && (existing.ws.readyState === WebSocket.OPEN || existing.ws.readyState === WebSocket.CONNECTING)) {
-            let expectedUrl = null;
-            try {
-                expectedUrl = buildWsUrl(subscription).url;
-            } catch (e) {}
             if (existing.url === expectedUrl) {
                 continue;
             }
@@ -710,7 +737,7 @@ async function getReadableTopics(config) {
         if (error.status !== 429) {
             throw error;
         }
-        await noteRateLimited();
+        await noteRateLimited(config.apiUrl, error.retryAfter);
         // Keep the last known result (even if outdated), or try all topics
         return readableTopicsCache.key === key ? readableTopicsCache.topics : config.topics;
     }
@@ -720,7 +747,7 @@ async function getReadableTopics(config) {
     if (skipped.length > 0) {
         console.log(`Not receiving from topics without read access: ${skipped.join(', ')}`);
     }
-    await recordReadAccess(config.apiUrl, skipped);
+    await recordReadAccess(config.apiUrl, skipped, key);
     if (!access.includes(null)) {
         readableTopicsCache = { key, topics, time: Date.now() };
         if (chrome.storage.session) {
@@ -730,23 +757,65 @@ async function getReadableTopics(config) {
     return topics;
 }
 
-// Topics the server refused to the configured credentials (HTTP 401/403), per server, so the popup
-// can say why nothing arrives instead of only showing an empty list.
-async function recordReadAccess(server, deniedTopics) {
+// Topics to subscribe to without asking /auth: a fresh check result if there is one, otherwise the
+// configured topics minus the ones already known to be unreadable. The pre-check costs one request
+// per topic, which a server with a small request limit can't afford on every connect; the
+// one-time check after repeated WebSocket failures still catches a newly unreadable topic.
+async function subscriptionTopics(group) {
+    const key = await readableTopicsKey(group);
+    if (readableTopicsCache.key === key && Date.now() - readableTopicsCache.time < READABLE_TOPICS_TTL) {
+        return readableTopicsCache.topics;
+    }
+    const { readAccessDenied = {}, readAccessKeys = {} } =
+        await chrome.storage.local.get(['readAccessDenied', 'readAccessKeys']);
+    if (readAccessDenied[group.apiUrl] && readAccessKeys[group.apiUrl] !== key) {
+        // Credentials or topics changed: the old denial no longer applies
+        forgetStaleReadAccess(group.apiUrl, key);
+        return group.topics;
+    }
+    const denied = new Set(readAccessDenied[group.apiUrl] || []);
+    return group.topics.filter(topic => !denied.has(topic));
+}
+
+// The denied list is only trusted for the server/credentials/topics it was recorded for
+async function forgetStaleReadAccess(server, key) {
     await serialized(async () => {
-        const { readAccessDenied = {} } = await chrome.storage.local.get(['readAccessDenied']);
+        const { readAccessDenied = {}, readAccessKeys = {} } =
+            await chrome.storage.local.get(['readAccessDenied', 'readAccessKeys']);
+        if (readAccessDenied[server] && readAccessKeys[server] !== key) {
+            delete readAccessDenied[server];
+            delete readAccessKeys[server];
+            await chrome.storage.local.set({ readAccessDenied, readAccessKeys });
+        }
+    });
+}
+
+// Topics the server refused to the configured credentials (HTTP 401/403), per server, so the popup
+// can say why nothing arrives instead of only showing an empty list. The key records which
+// credentials and topics the list belongs to (see subscriptionTopics).
+async function recordReadAccess(server, deniedTopics, key) {
+    await serialized(async () => {
+        const { readAccessDenied = {}, readAccessKeys = {} } =
+            await chrome.storage.local.get(['readAccessDenied', 'readAccessKeys']);
         const previous = readAccessDenied[server];
         if (deniedTopics.length === 0) {
-            if (!previous) return;
+            if (!previous && !readAccessKeys[server]) return;
             delete readAccessDenied[server];
+            delete readAccessKeys[server];
         } else {
-            if (previous && previous.length === deniedTopics.length
+            if (previous && readAccessKeys[server] === key
+                && previous.length === deniedTopics.length
                 && previous.every(topic => deniedTopics.includes(topic))) {
                 return;
             }
             readAccessDenied[server] = deniedTopics;
+            if (key) {
+                readAccessKeys[server] = key;
+            } else {
+                delete readAccessKeys[server];
+            }
         }
-        await chrome.storage.local.set({ readAccessDenied });
+        await chrome.storage.local.set({ readAccessDenied, readAccessKeys });
     });
 }
 
@@ -840,18 +909,59 @@ function closeWebSocket() {
     }
 }
 
-// Returns { url, logUrl }: url may carry the credentials in ?auth=, logUrl never does
+// Returns { url, keyUrl, logUrl }: url may carry ?auth= and ?since=, keyUrl carries only the
+// credentials (to tell whether the subscription changed), and logUrl never carries either
 function buildWsUrl(config) {
     // Host only, like the HTTP calls: credentials embedded in the URL must not end up in the WebSocket URL
     const urlObj = new URL(NtfyAPI.normalizeServerUrl(config.apiUrl));
     const scheme = urlObj.protocol === 'http:' ? 'ws:' : 'wss:';
     const logUrl = `${scheme}//${urlObj.host}/${config.topics.map(encodeURIComponent).join(',')}/ws`;
 
+    // The server replays what was missed since then, so a reconnect doesn't need a poll per topic
+    const params = new URLSearchParams();
+    if (config.since !== undefined && config.since !== null) {
+        params.set('since', config.since);
+    }
     // Browsers can't set headers on a WebSocket, so ntfy accepts the Authorization header value in ?auth=
     const auth = NtfyAPI.buildAuthHeaderValue(config);
-    const url = auth ? `${logUrl}?auth=${NtfyAPI.base64UrlEncode(auth)}` : logUrl;
+    if (auth) {
+        params.set('auth', NtfyAPI.base64UrlEncode(auth));
+    }
+    const query = params.toString();
 
-    return { url, logUrl };
+    return {
+        url: query ? `${logUrl}?${query}` : logUrl,
+        keyUrl: auth ? `${logUrl}?auth=${NtfyAPI.base64UrlEncode(auth)}` : logUrl,
+        logUrl
+    };
+}
+
+// The topics that had a sync state when the socket connected: their replay is a catch-up worth a
+// notification, while a topic without one is doing its initial (silent) sync
+async function initializedTopicsFor(server, topics) {
+    const { topicSyncState = {} } = await chrome.storage.local.get(['topicSyncState']);
+    const initialized = new Set();
+    for (const topic of topics) {
+        if (topicSyncState[`${server}${TOPIC_SEPARATOR}${topic}`]) {
+            initialized.add(topic);
+        }
+    }
+    return initialized;
+}
+
+// What the WebSocket replays on connect: the oldest sync point of its topics, so none is missed,
+// or the initial window when a topic was never synced
+async function wsSinceFor(group, topics) {
+    const { topicSyncState = {} } = await chrome.storage.local.get(['topicSyncState']);
+    let since = null;
+    for (const topic of topics) {
+        const state = topicSyncState[`${group.apiUrl}${TOPIC_SEPARATOR}${topic}`];
+        if (!state || state.since === null) {
+            return INITIAL_SYNC_SINCE;
+        }
+        since = since === null ? state.since : Math.min(since, state.since);
+    }
+    return since === null ? INITIAL_SYNC_SINCE : since;
 }
 
 async function connectWebSocket(config) {
@@ -864,23 +974,29 @@ async function connectWebSocket(config) {
         reconnectTimer: null,
         keepaliveTimer: null,
         reconnectDelay: 5000,
-        lastActivity: Date.now()
+        lastActivity: Date.now(),
+        opened: false,
+        connectedAt: Math.floor(Date.now() / 1000)
     };
     sockets.set(server, entry);
 
     try {
-        const { url, logUrl } = buildWsUrl(config);
+        const { url, keyUrl, logUrl } = buildWsUrl(config);
         console.log('Connecting WebSocket to:', logUrl);
+        const initialized = await initializedTopicsFor(server, config.topics);
         const socket = new WebSocket(url);
         entry.ws = socket;
-        entry.url = url;
+        // The reconnect check compares this: ?since= moves with every message and must not count
+        entry.url = keyUrl;
 
         socket.onopen = () => {
             console.log(`WebSocket connected to ${server}.`);
+            entry.opened = true;
             entry.lastActivity = Date.now();
             entry.reconnectDelay = 5000;
+            wsFailures.delete(server);
+            authCheckedServers.delete(server);
             startKeepalive(server, socket);
-            syncMissedMessages(server);
             updateUnreadBadge(); // Initial badge sync
         };
 
@@ -890,7 +1006,8 @@ async function connectWebSocket(config) {
                 const message = JSON.parse(event.data);
                 if (message.event === 'message') {
                     message.server = server;
-                    await handleIncomingMessage(message);
+                    // The server replays the missed messages on connect; they are catch-up, not live
+                    await handleIncomingMessage(message, message.time < entry.connectedAt - 2, initialized);
                 }
             } catch (e) {
                 console.error('Error processing WebSocket message:', e);
@@ -901,6 +1018,9 @@ async function connectWebSocket(config) {
             stopKeepalive(server);
             if (sockets.get(server) !== entry) {
                 return; // Replaced or closed on purpose
+            }
+            if (!entry.opened) {
+                wsFailures.set(server, (wsFailures.get(server) || 0) + 1);
             }
             console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}. Reconnecting...`);
             scheduleReconnect(server);
@@ -932,48 +1052,121 @@ function scheduleReconnect(server, delay) {
     }, wait);
 }
 
-// While rate limited, leave open sockets alone and schedule reconnects for after the pause.
-// Resolves to true if rate limited.
-async function waitForRateLimit() {
-    const pause = await rateLimitRemaining();
+// ntfy limits requests per visitor, so a pause belongs to one server: a server with wrong
+// credentials answers 429 ("too many auth failures"), and it must not stop receiving from the
+// others. The pauses are kept in storage.session, so a restarted service worker keeps to them.
+const rateLimitedUntil = new Map(); // server -> timestamp
+const ATTACHMENT_RATE_LIMIT = ''; // attachment fetches aren't tied to a subscription server
+let rateLimitsLoading = null;
+
+function loadRateLimits() {
+    if (!rateLimitsLoading) {
+        rateLimitsLoading = (async () => {
+            if (!chrome.storage.session) {
+                return;
+            }
+            try {
+                const { rateLimitedUntilByServer = {} } =
+                    await chrome.storage.session.get(['rateLimitedUntilByServer']);
+                Object.entries(rateLimitedUntilByServer).forEach(([server, until]) => {
+                    if (until > Date.now()) {
+                        rateLimitedUntil.set(server, until);
+                    }
+                });
+            } catch (e) {}
+        })();
+    }
+    return rateLimitsLoading;
+}
+
+async function saveRateLimits() {
+    if (!chrome.storage.session) {
+        return;
+    }
+    const now = Date.now();
+    const stored = {};
+    for (const [server, until] of rateLimitedUntil) {
+        if (until > now) {
+            stored[server] = until;
+        } else {
+            rateLimitedUntil.delete(server);
+        }
+    }
+    await chrome.storage.session.set({ rateLimitedUntilByServer: stored }).catch(() => {});
+}
+
+// ntfy sends Retry-After when it knows the wait; without it, the longer default pause applies.
+// An empty server means an attachment fetch, which isn't tied to a subscription.
+async function noteRateLimited(server, retryAfterSeconds = 0) {
+    await loadRateLimits();
+    const pause = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : RATE_LIMIT_PAUSE;
+    const key = server ? NtfyAPI.normalizeServerUrl(server) : ATTACHMENT_RATE_LIMIT;
+    rateLimitedUntil.set(key, Math.max(rateLimitedUntil.get(key) || 0, Date.now() + pause));
+    console.log(`Server ${key || 'attachment fetch'} request limit reached (HTTP 429), pausing it for ${Math.ceil(pause / 1000)}s.`);
+    await saveRateLimits();
+}
+
+// Without a server, the longest pause of any of them (used before an attachment fetch)
+async function rateLimitRemaining(server) {
+    await loadRateLimits();
+    if (!server) {
+        let longest = 0;
+        for (const until of rateLimitedUntil.values()) {
+            longest = Math.max(longest, until - Date.now());
+        }
+        return Math.max(0, longest);
+    }
+    const until = rateLimitedUntil.get(NtfyAPI.normalizeServerUrl(server)) || 0;
+    return Math.max(0, until - Date.now());
+}
+
+// While a server is rate limited, leave its open socket alone and schedule a reconnect for after
+// the pause. Resolves to true if that server is rate limited.
+async function waitForRateLimit(server) {
+    const pause = await rateLimitRemaining(server);
     if (pause === 0) {
         return false;
     }
-    for (const [server, entry] of sockets) {
-        if (!entry.ws || entry.ws.readyState === WebSocket.CLOSED || entry.ws.readyState === WebSocket.CLOSING) {
-            console.log(`Server request limit reached, connecting again in ${Math.ceil(pause / 1000)}s.`);
-            scheduleReconnect(server, pause);
-        }
+    const key = NtfyAPI.normalizeServerUrl(server);
+    const entry = sockets.get(key);
+    if (entry && (!entry.ws || entry.ws.readyState === WebSocket.CLOSED || entry.ws.readyState === WebSocket.CLOSING)) {
+        console.log(`Server request limit reached, connecting again in ${Math.ceil(pause / 1000)}s.`);
+        scheduleReconnect(key, pause);
+    } else if (!entry) {
+        // After a service worker restart there is no socket entry to reschedule, so reconnect afterwards
+        console.log(`Server request limit reached, connecting again in ${Math.ceil(pause / 1000)}s.`);
+        setTimeout(() => initWebSocket(), pause + 1000);
     }
     return true;
 }
 
-// The pause is kept in storage.session, so a restarted service worker keeps to it
-let rateLimitedUntil = null;
-async function noteRateLimited() {
-    rateLimitedUntil = Date.now() + RATE_LIMIT_PAUSE;
-    console.log('Server request limit reached (HTTP 429), pausing background requests.');
-    if (chrome.storage.session) {
-        await chrome.storage.session.set({ rateLimitedUntil }).catch(() => {});
-    }
+// Replayed messages (the server's since= backlog) are catch-up, not live: collect them briefly and
+// show one summary, as a polling catch-up does, instead of a notification per message
+let catchUpBuffer = [];
+let catchUpTimer = null;
+function queueCatchUpNotification(notification) {
+    catchUpBuffer.push(notification);
+    clearTimeout(catchUpTimer);
+    catchUpTimer = setTimeout(async () => {
+        const notifications = catchUpBuffer;
+        catchUpBuffer = [];
+        catchUpTimer = null;
+        const isMuted = await mutedTopicFilter();
+        showCatchUpNotifications(notifications.filter(item => !isMuted(item.topic)));
+    }, 1000);
 }
 
-async function rateLimitRemaining() {
-    if (rateLimitedUntil === null) {
-        rateLimitedUntil = 0;
-        if (chrome.storage.session) {
-            try {
-                rateLimitedUntil = (await chrome.storage.session.get(['rateLimitedUntil'])).rateLimitedUntil || 0;
-            } catch (e) {}
-        }
-    }
-    return Math.max(0, rateLimitedUntil - Date.now());
-}
-
-async function handleIncomingMessage(notification) {
+// A topic that had no state when the socket connected was never synced: its replay is the initial
+// sync, which stays silent like the first poll (initialized is null for live messages)
+async function handleIncomingMessage(notification, replayed = false, initialized = null) {
     console.log('Received notification:', notification.id, notification.title);
-    if (await processMessage(notification) && !(await mutedTopicFilter())(notification.topic)) {
-        showDesktopNotification(notification);
+    const notify = !replayed || !initialized || initialized.has(notification.topic);
+    if (await processMessage(notification) && notify && !(await mutedTopicFilter())(notification.topic)) {
+        if (replayed) {
+            queueCatchUpNotification(notification);
+        } else {
+            showDesktopNotification(notification);
+        }
     }
 }
 
@@ -1143,7 +1336,7 @@ async function notificationImage(notification) {
         }
     } catch (e) {
         if (e.status === 429) {
-            await noteRateLimited();
+            await noteRateLimited(ATTACHMENT_RATE_LIMIT, e.retryAfter);
         }
         console.warn(`Notification image: could not load ${attachment.name || 'the attachment'}:`, e.message);
         return null;
@@ -1302,15 +1495,28 @@ async function runSync(server) {
     if (!config.receiveEnabled) return;
     const groups = receiveGroups(config).filter(group => !server || group.apiUrl === server);
     if (groups.length === 0) return;
-    if (await rateLimitRemaining() > 0) return;
 
     await migrateTopicSyncState(config);
 
+    const { readAccessDenied = {}, readAccessKeys = {} } =
+        await chrome.storage.local.get(['readAccessDenied', 'readAccessKeys']);
     const toNotify = [];
     for (const group of groups) {
-        const topics = await getReadableTopics(group);
-        if (await rateLimitRemaining() > 0) return;
+        if (await waitForRateLimit(group.apiUrl)) {
+            continue;
+        }
+        // Poll the configured topics directly: a 401/403 tells the same as an /auth pre-check,
+        // without one request per topic
+        const topics = await subscriptionTopics(group);
+        if (await waitForRateLimit(group.apiUrl)) {
+            continue;
+        }
 
+        const accessKey = await readableTopicsKey(group);
+        const denied = new Set(readAccessKeys[group.apiUrl] === accessKey
+            ? (readAccessDenied[group.apiUrl] || [])
+            : []);
+        const newlyDenied = [];
         for (const topic of topics) {
             // A topic synced for the first time gets its recent history without desktop notifications
             const syncKey = `${group.apiUrl}${TOPIC_SEPARATOR}${topic}`;
@@ -1339,14 +1545,19 @@ async function runSync(server) {
                 }
             } catch (error) {
                 if (error.status === 429) {
-                    await noteRateLimited();
+                    await noteRateLimited(group.apiUrl, error.retryAfter);
                     break;
+                }
+                if (error.status === 401 || error.status === 403) {
+                    denied.add(topic);
+                    newlyDenied.push(topic);
+                    continue;
                 }
                 console.error(`Failed to sync missed messages for topic ${topic} on ${group.apiUrl}:`, error.message);
             }
         }
-        if (await rateLimitRemaining() > 0) {
-            break;
+        if (newlyDenied.length > 0) {
+            await recordReadAccess(group.apiUrl, [...denied], accessKey);
         }
     }
 
@@ -1418,6 +1629,133 @@ function forgetRemovedTopics(config) {
     });
 }
 
+// Manual pull from the popup: fetches everything the servers still cache for every subscribed
+// topic, not just what arrived since the last sync. Silent, without desktop notifications, as the
+// user is looking at the list. Resolves to a summary for the popup.
+let pullInFlight = null;
+function pullAllMessages() {
+    if (!pullInFlight) {
+        pullInFlight = runPull().finally(() => {
+            pullInFlight = null;
+        });
+    }
+    return pullInFlight;
+}
+
+async function runPull() {
+    const config = await NtfyAPI.getConfig();
+    if (!config.receiveEnabled) {
+        return { success: false, reason: 'disabled' };
+    }
+    const groups = receiveGroups(config);
+    if (groups.length === 0) {
+        return { success: false, reason: 'empty' };
+    }
+
+    await migrateTopicSyncState(config);
+
+    const { readAccessDenied = {}, readAccessKeys = {}, receivedNotifications: before = [] } =
+        await chrome.storage.local.get(['readAccessDenied', 'readAccessKeys', 'receivedNotifications']);
+    const beforeIds = new Set(before.map(notification => notification.id));
+    let failed = 0;
+    let rateLimited = false;
+    let waitMs = 0;
+    let attempted = 0;
+    // One request per topic: the /auth pre-check getReadableTopics does would double them, and a
+    // topic the credentials can't read answers 401/403 here just as well
+    for (const group of groups) {
+        // A paused server is skipped; the others are still pulled
+        const paused = await rateLimitRemaining(group.apiUrl);
+        if (paused > 0) {
+            rateLimited = true;
+            waitMs = waitMs === 0 ? paused : Math.min(waitMs, paused);
+            continue;
+        }
+        attempted++;
+        const accessKey = await readableTopicsKey(group);
+        const denied = new Set(readAccessKeys[group.apiUrl] === accessKey
+            ? (readAccessDenied[group.apiUrl] || [])
+            : []);
+        const newlyDenied = [];
+        for (const topic of group.topics) {
+            if (denied.has(topic)) {
+                continue;
+            }
+            try {
+                const messages = await NtfyAPI.getNotifications(group, topic, 'all');
+                await mergePulledMessages(group.apiUrl, topic, messages);
+            } catch (error) {
+                if (error.status === 429) {
+                    await noteRateLimited(group.apiUrl, error.retryAfter);
+                    rateLimited = true;
+                    const remaining = await rateLimitRemaining(group.apiUrl);
+                    waitMs = waitMs === 0 ? remaining : Math.min(waitMs, remaining);
+                    break;
+                }
+                if (error.status === 401 || error.status === 403) {
+                    denied.add(topic);
+                    newlyDenied.push(topic);
+                    failed++;
+                    continue;
+                }
+                failed++;
+                console.error(`Manual pull failed for topic ${topic} on ${group.apiUrl}:`, error.message);
+            }
+        }
+        if (newlyDenied.length > 0) {
+            await recordReadAccess(group.apiUrl, [...denied], accessKey);
+        }
+    }
+
+    // Every server was paused before the pull could do anything
+    if (attempted === 0) {
+        return { success: false, reason: 'rate-limited', retryAfter: Math.max(1, Math.ceil(waitMs / 1000)) };
+    }
+
+    // What the pull actually brought into the list (the history keeps the newest 50)
+    const { receivedNotifications: after = [] } = await chrome.storage.local.get(['receivedNotifications']);
+    const added = after.filter(notification => !beforeIds.has(notification.id)).length;
+    return { success: true, added, failed, rateLimited, retryAfter: Math.ceil(waitMs / 1000) };
+}
+
+// Merges a pull's backlog into the history and the sync state in one write. A topic with a long
+// server cache would otherwise take two storage writes per message, keeping the list from updating
+// and the service worker busy for a long time.
+function mergePulledMessages(server, topic, messages) {
+    return serialized(async () => {
+        const { topicSyncState = {}, receivedNotifications = [], deletedMessageIds = [] } =
+            await chrome.storage.local.get(['topicSyncState', 'receivedNotifications', 'deletedMessageIds']);
+        const syncKey = `${server}${TOPIC_SEPARATOR}${topic}`;
+        const state = topicSyncState[syncKey] || { since: null, ids: [] };
+        const seen = new Set(state.ids);
+        const deletedIds = new Set(deletedMessageIds);
+        const inHistory = new Set(receivedNotifications.map(notification => notification.id));
+
+        const newOnes = [];
+        for (const notification of [...messages].sort((a, b) => a.time - b.time)) {
+            if (seen.has(notification.id)) {
+                continue;
+            }
+            seen.add(notification.id);
+            state.ids.push(notification.id);
+            if (state.since === null || notification.time > state.since) {
+                state.since = notification.time;
+            }
+            notification.server = server;
+            if (!deletedIds.has(notification.id) && !inHistory.has(notification.id)) {
+                newOnes.push(notification);
+            }
+        }
+        state.ids = state.ids.slice(-MAX_SEEN_IDS_PER_TOPIC);
+        topicSyncState[syncKey] = state;
+
+        const updated = [...newOnes, ...receivedNotifications.filter(notification => !deletedIds.has(notification.id))]
+            .sort((a, b) => b.time - a.time)
+            .slice(0, MAX_HISTORY_ITEMS);
+        await chrome.storage.local.set({ topicSyncState, receivedNotifications: updated });
+    });
+}
+
 function isWebSocketOpen() {
     return [...sockets.values()].some(entry =>
         entry.ws && entry.ws.readyState === WebSocket.OPEN);
@@ -1485,6 +1823,21 @@ async function allWebSocketsOpen() {
 
 // Listen for manual sync requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'reconnect') {
+        // Access to this server was just granted: forget its failures and connect again now
+        const server = NtfyAPI.normalizeServerUrl(request.server || '');
+        if (!server) {
+            sendResponse({ success: false });
+            return false;
+        }
+        wsFailures.delete(server);
+        authCheckedServers.delete(server);
+        closeSocket(server);
+        initWebSocket()
+            .then(() => sendResponse({ success: true }))
+            .catch(() => sendResponse({ success: false }));
+        return true;
+    }
     if (request.action === 'sync') {
         allWebSocketsOpen().then(open => {
             if (open) {
@@ -1496,6 +1849,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 .then(() => sendResponse({ success: true }))
                 .catch(() => sendResponse({ success: false }));
         });
+        return true;
+    }
+    if (request.action === 'pull') {
+        console.log('Manual pull requested from popup...');
+        pullAllMessages()
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('Manual pull failed:', error.message);
+                sendResponse({ success: false });
+            });
         return true;
     }
 });

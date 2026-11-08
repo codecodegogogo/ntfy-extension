@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationsTitle: document.getElementById('notifications-title'),
     notifyToggle: document.getElementById('notify-toggle'),
     notifyCheckbox: document.getElementById('notify-checkbox'),
+    pullBtn: document.getElementById('pull-btn'),
     notificationsSection: document.getElementById('notifications-section'),
     notificationsList: document.getElementById('notifications-list'),
     topicColumn: document.getElementById('topic-column'),
@@ -783,7 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateMissingSettings();
   }
 
-  function requestServerAccess(pattern) {
+  function requestServerAccess(pattern, apiUrl) {
     if (!pattern) {
       return;
     }
@@ -793,7 +794,8 @@ document.addEventListener('DOMContentLoaded', () => {
       showSettingsStatus(granted ? '已获得服务器访问权限' : '未获得服务器访问权限', granted ? 'success' : 'error');
       updateServerAccessUI();
       if (granted) {
-        chrome.runtime.sendMessage({ action: 'sync' }); // Fetch what was missed while blocked
+        // Reconnect this server right away: its socket may be stuck from before the permission
+        chrome.runtime.sendMessage({ action: 'reconnect', server: apiUrl });
       }
     });
   }
@@ -1185,6 +1187,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Callback-style sendMessage, like the storage helpers: Firefox's chrome.* namespace has no promises
+  function sendMessageAsync(message) {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage(message, response => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+        } else {
+          resolve(response);
+        }
+      });
+    });
+  }
+
   // The link button in the message bar inserts the tab's URL. Always there, so it can say why when the
   // tab's address isn't available; then it is dimmed further.
   function updateInsertUrlButton() {
@@ -1367,6 +1382,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     elements.notifyCheckbox.addEventListener('change', handleNotifyToggle);
+    elements.pullBtn.addEventListener('click', handlePullAll);
 
     // Bulk actions
     elements.markAllReadBtn.addEventListener('click', handleMarkAllRead);
@@ -2253,7 +2269,8 @@ document.addEventListener('DOMContentLoaded', () => {
     accessBtn.textContent = '🔓 允许访问此服务器';
     accessBtn.addEventListener('click', () => {
       const current = findSendServer(server.id);
-      requestServerAccess(NtfyAPI.serverOriginPattern(current ? current.apiUrl : ''));
+      const apiUrl = current ? current.apiUrl : '';
+      requestServerAccess(NtfyAPI.serverOriginPattern(apiUrl), apiUrl);
     });
 
     const accessHint = document.createElement('p');
@@ -2549,7 +2566,8 @@ document.addEventListener('DOMContentLoaded', () => {
     accessBtn.textContent = '🔓 允许访问此服务器';
     accessBtn.addEventListener('click', () => {
       const current = findSubscription(subscription.id);
-      requestServerAccess(NtfyAPI.serverOriginPattern(current ? resolvedSubscription(current).apiUrl : ''));
+      const apiUrl = current ? resolvedSubscription(current).apiUrl : '';
+      requestServerAccess(NtfyAPI.serverOriginPattern(apiUrl), apiUrl);
     });
 
     const accessHint = document.createElement('p');
@@ -3567,6 +3585,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const configured = Boolean(config.receiveEnabled && effectiveSubscriptions().length > 0);
     const receivable = Boolean(entry && (entry.kind === 'all' || entry.kind === 'subscription'));
     elements.notifyToggle.hidden = !configured || !receivable;
+    // The pull fetches every subscription, so it sits next to the bell on All topics only
+    elements.pullBtn.hidden = !configured || !entry || entry.kind !== 'all';
     const checkbox = elements.notifyCheckbox;
     if (!entry) {
       checkbox.checked = true;
@@ -3604,6 +3624,50 @@ document.addEventListener('DOMContentLoaded', () => {
       await saveToStorageLocal({ notificationsMuted, mutedTopics });
     } catch (error) {
       console.error('Error saving the notification setting:', error);
+    }
+  }
+
+  // Manual pull: asks the background to fetch everything the servers still cache for every
+  // subscribed topic, then reports how many new messages arrived.
+  async function handlePullAll() {
+    if (elements.pullBtn.disabled) {
+      return;
+    }
+    elements.pullBtn.disabled = true;
+    elements.pullBtn.classList.add('pulling');
+    showStatus('正在从服务器拉取消息…', 'info');
+    try {
+      const result = await sendMessageAsync({ action: 'pull' });
+      if (!result || !result.success) {
+        const reason = result && result.reason;
+        const wait = result && result.retryAfter;
+        if (reason === 'rate-limited') {
+          showStatus(wait > 0 ? `服务器请求过于频繁，请 ${wait} 秒后再试` : '服务器请求过于频繁，请稍后再试', 'warning');
+        } else if (reason === 'disabled') {
+          showStatus('接收功能未开启', 'warning');
+        } else if (reason === 'empty') {
+          showStatus('没有配置订阅', 'warning');
+        } else {
+          showStatus('拉取失败', 'error');
+        }
+      } else if (result.rateLimited) {
+        const wait = result.retryAfter > 0 ? `，请 ${result.retryAfter} 秒后再试` : '';
+        showStatus(`已拉取 ${result.added} 条新消息，服务器请求过于频繁，其余主题未拉取${wait}`, 'warning');
+      } else if (result.added > 0) {
+        showStatus(`已拉取 ${result.added} 条新消息`, 'success');
+      } else if (result.failed > 0) {
+        showStatus(`没有新消息，${result.failed} 个主题拉取失败`, 'warning');
+      } else {
+        showStatus('没有新消息', 'success');
+      }
+      if (result && result.success) {
+        scheduleNotificationsRefresh();
+      }
+    } catch (error) {
+      showStatus('拉取失败', 'error');
+    } finally {
+      elements.pullBtn.disabled = false;
+      elements.pullBtn.classList.remove('pulling');
     }
   }
 

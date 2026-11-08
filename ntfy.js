@@ -10,6 +10,16 @@ const NtfyAPI = {
     TOPIC_PATTERN: /^[-_A-Za-z0-9]{1,64}$/,
 
     /**
+     * The Retry-After header of a rate-limited response, in seconds (0 when the server didn't say)
+     * @param {Response} response
+     * @returns {number}
+     */
+    retryAfterSeconds(response) {
+        const seconds = parseInt(response.headers.get('Retry-After'), 10);
+        return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+    },
+
+    /**
      * Split a stored comma-separated topic list
      * @param {string} value
      * @returns {string[]}
@@ -711,7 +721,10 @@ const NtfyAPI = {
                 return false;
             }
             if (response.status === 429) {
-                throw Object.assign(new Error('HTTP 429: Too Many Requests'), { status: 429 });
+                throw Object.assign(new Error('HTTP 429: Too Many Requests'), {
+                    status: 429,
+                    retryAfter: this.retryAfterSeconds(response)
+                });
             }
             return null;
         } catch (e) {
@@ -744,7 +757,11 @@ const NtfyAPI = {
         });
 
         if (!response.ok) {
-            throw Object.assign(new Error(`HTTP ${response.status}: ${response.statusText}`), { status: response.status });
+            // ntfy sends Retry-After (seconds) when it knows how long the request limit lasts
+            throw Object.assign(new Error(`HTTP ${response.status}: ${response.statusText}`), {
+                status: response.status,
+                retryAfter: this.retryAfterSeconds(response)
+            });
         }
 
         const text = await response.text();
